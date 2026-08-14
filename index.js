@@ -22,10 +22,7 @@ const USER_AGENT = "CLI/unknown CodeBuddy/2.136.0";
 const STREAM_IDLE_TIMEOUT_MS = 300_000;
 const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"];
-const THINKING_LEVEL_MAP = Object.fromEntries([
-  ["off", null],
-  ...EFFORTS.map((effort) => [effort, effort]),
-]);
+const THINKING_LEVELS = ["off", ...EFFORTS];
 const COMPAT = {
   supportsStore: false,
   supportsDeveloperRole: false,
@@ -50,21 +47,58 @@ const FALLBACK_MODELS = [
   codeBuddyModel({ id, name: modelName, contextWindow, maxTokens, images }),
 );
 
-function codeBuddyModel({ id, name: modelName, contextWindow, maxTokens, images }) {
+function codeBuddyModel({ id, name: modelName, contextWindow, maxTokens, images, reasoning = true, thinkingLevelMap = { off: null }, defaultReasoningEffort, thinkingFormat }) {
   return {
     id,
     name: modelName,
     api: "openai-completions",
     provider: PROVIDER,
     baseUrl: BASE_URL,
-    reasoning: true,
-    thinkingLevelMap: { ...THINKING_LEVEL_MAP },
+    reasoning,
+    ...(reasoning ? { thinkingLevelMap: { ...thinkingLevelMap } } : {}),
+    ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
     input: images ? ["text", "image"] : ["text"],
     cost: { ...NO_COST },
     contextWindow,
     maxTokens,
-    compat: { ...COMPAT },
+    compat: { ...COMPAT, ...(thinkingFormat ? { thinkingFormat } : {}) },
   };
+}
+
+function remoteReasoning(raw, fallback) {
+  const reasoning = raw.supportsReasoning ?? fallback?.reasoning ?? raw.onlyReasoning === true;
+  if (!reasoning) return { reasoning: false };
+  const declared = raw.thinkingLevelMap && typeof raw.thinkingLevelMap === "object" ? raw.thinkingLevelMap : undefined;
+  const thinkingLevelMap = declared
+    ? Object.fromEntries(THINKING_LEVELS.map((level) => [level,
+        Object.hasOwn(declared, level) && (typeof declared[level] === "string" || declared[level] === null) ? declared[level] : null]))
+    : { ...(fallback?.thinkingLevelMap ?? {}), ...(raw.onlyReasoning === true ? { off: null } : {}) };
+  const effort = raw.reasoning?.effort;
+  const defaultReasoningEffort = EFFORTS.includes(effort) && thinkingLevelMap[effort] !== null ? effort : undefined;
+  return {
+    reasoning: true,
+    thinkingLevelMap,
+    ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+    ...(typeof raw.thinkingFormat === "string" ? { thinkingFormat: raw.thinkingFormat } : {}),
+  };
+}
+
+function configuredReasoning(entry, base) {
+  if (entry.reasoningEfforts === false) return { reasoning: false };
+  if (!entry.reasoningEfforts || typeof entry.reasoningEfforts !== "object") {
+    return base ? {
+      reasoning: base.reasoning,
+      thinkingLevelMap: base.thinkingLevelMap,
+      defaultReasoningEffort: base.defaultReasoningEffort,
+      thinkingFormat: base.compat?.thinkingFormat,
+    } : { reasoning: false };
+  }
+  const map = {};
+  for (const level of THINKING_LEVELS) {
+    if (!Object.hasOwn(entry.reasoningEfforts, level)) map[level] = null;
+    else if (!(level === "off" && entry.reasoningEfforts[level] === null)) map[level] = entry.reasoningEfforts[level];
+  }
+  return { reasoning: true, thinkingLevelMap: map, thinkingFormat: entry.compat?.thinkingFormat };
 }
 
 function positiveInteger(...values) {
@@ -94,6 +128,7 @@ function modelsFromConfig(data) {
       contextWindow,
       maxTokens,
       images: raw.supportsImages === true || fallback?.input.includes("image") === true,
+      ...remoteReasoning(raw, fallback),
     })];
   });
 }
@@ -169,15 +204,19 @@ function selectCodeBuddyModels(base, entries) {
   const byId = new Map(base.map((model) => [model.id, model]));
   return entries.map((entry) => {
     const model = byId.get(entry.id);
+    const reasoning = configuredReasoning(entry, model);
     return codeBuddyModel({
       id: entry.id,
       name: entry.name ?? model?.name ?? entry.id,
       contextWindow: entry.contextWindow ?? model?.contextWindow ?? 262144,
       maxTokens: entry.maxTokens ?? model?.maxTokens ?? 32768,
       images: entry.input?.includes("image") ?? model?.input.includes("image") ?? false,
+      ...reasoning,
     });
   });
 }
+
+export const __testing = Object.freeze({ modelsFromConfig, selectCodeBuddyModels });
 
 export function apply(ctx, config) {
   let current = () => config;
@@ -246,6 +285,15 @@ export function apply(ctx, config) {
     resolveApiKey,
     resolveAttachments: () => ctx.get("attachments"),
   });
+  const resolveModel = adapter.resolveModel.bind(adapter);
+  adapter.resolveModel = async (provider, model, signal) => {
+    const resolved = await resolveModel(provider, model, signal);
+    if (provider !== PROVIDER || !resolved.reasoning) return resolved;
+    const configured = profiles().get(PROVIDER)?.piProvider.getModels().find((entry) => entry.id === model);
+    const effort = configured?.defaultReasoningEffort;
+    if (!effort || !resolved.reasoning.efforts.some((entry) => entry.id === effort)) return resolved;
+    return { ...resolved, reasoning: { ...resolved.reasoning, defaultEffort: effort } };
+  };
   const listModels = adapter.listModels.bind(adapter);
   let refreshPromise;
   adapter.listModels = async (provider) => {

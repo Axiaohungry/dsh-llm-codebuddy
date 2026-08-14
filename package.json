@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-codebuddy",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "使用 WorkBuddy API Key 为 DeepSeek Harness 接入 CodeBuddy 模型",
   "author": "Axiaohungry",
   "keywords": [
@@ -31,11 +31,12 @@
     "index.js",
     "cli.js",
     "cordis.patch.yml",
+    "docs",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check cli.js && node cli.js --self-test"
+    "check": "node --check index.js && node --check cli.js && node --test test.js && node cli.js --self-test"
   },
   "dsh": {
     "bundle": {

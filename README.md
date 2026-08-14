@@ -15,7 +15,7 @@ DSH WebUI 中填写 API Key、获取模型、调整模型参数并使用 CodeBud
 - 自动获取 CodeBuddy 当前可用模型；
 - 支持编辑模型 ID、名称、上下文窗口和最大输出 Token；
 - 支持添加、删除模型以及重新同步模型目录；
-- 支持 `minimal / low / medium / high / xhigh / max` 思考程度；
+- 按模型目录声明各模型自己的思考能力、可选档位和默认档位；
 - 输入新 API Key 可替换旧值，留空保存则保留原值；
 - 模型接口暂时不可用时使用内置目录兜底；
 - 独立安装，不修改 DSH 全局安装目录。
@@ -83,15 +83,16 @@ API Key 由 DSH 凭据服务保存，不会写入模型目录或插件源码。
 
 ## 思考程度
 
-DSH 显示思考程度选项，插件把选中的档位转换为 `reasoning_effort` 并发送给
-CodeBuddy。模型推理由 CodeBuddy 云端执行。
+DSH 显示的思考程度来自当前模型自身的能力声明，插件把选中的档位转换为
+`reasoning_effort` 并发送给 CodeBuddy。模型推理由 CodeBuddy 云端执行。
 
 ```text
-minimal / low / medium / high / xhigh / max
+off / minimal / low / medium / high / xhigh / max
 ```
 
-当前不提供 `off`，因为 CodeBuddy 模型目录中的模型属于推理模型。未选择档位时，
-使用 CodeBuddy 对应模型的默认值。
+实际显示哪些档位由 `/v3/config` 中该模型的 `supportsReasoning`、`onlyReasoning`、
+`thinkingLevelMap` 和 `reasoning.effort` 决定，不能跨模型共用一套固定档位。未手动
+选择时，使用 CodeBuddy 为该模型返回的默认档位；服务端没有声明时则不强行指定。
 
 ## 更新
 
@@ -139,6 +140,17 @@ dsh plugin --profile web list --depth 0
 
 确认 API Key 来自 WorkBuddy 且仍然有效，然后重新输入 Key 并点击“获取可用模型”。
 接口临时不可用时，插件仍会提供内置模型目录。
+
+### 为什么别人能看到某个模型，我这里看不到
+
+模型权限与 API Key 绑定。插件只导入 `/v3/config` 中 `agents[name=cli].models` 为
+当前 Key 返回的模型；更换 Key 后请重新点击“获取可用模型”。插件不会强行显示
+当前 Key 未授权的模型。
+
+## 开发文档
+
+需要开发其他 Agent 或 Provider 时，请阅读
+[CodeBuddy 调用 WorkBuddy API 开发文档](./docs/CodeBuddy调用WorkBuddy-API开发文档.md)。
 
 ### 卸载后仍显示旧页面
 
