@@ -169,6 +169,7 @@ DSH Agent → 本插件 → CodeBuddy /v2/chat/completions
 - WorkBuddy：提供 API Key；
 - 插件：负责 Provider 注册、模型目录转换和请求兼容；
 - CodeBuddy：负责模型推理并返回结果。
+<img width="1885" height="853" alt="image" src="https://github.com/user-attachments/assets/eda31b48-8412-414d-b552-1b7ce0a7c3a0" />
 
 ## License
 
