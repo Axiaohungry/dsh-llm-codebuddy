@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 import { parseDocument } from "yaml";
 
 const PACKAGE = "dsh-llm-codebuddy";
+const PACKAGE_VERSION = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
+const PACKAGE_SPEC = `${PACKAGE}@${PACKAGE_VERSION}`;
 const PROVIDER_PATH = ["llm-pi-ai", "providers", "codebuddy-cn"];
 const IGNORED_BUILDS = ["@google/genai", "protobufjs"];
 const require = createRequire(import.meta.url);
@@ -112,7 +114,7 @@ function install() {
   for (const profile of ["web", "headless"]) {
     runDsh(["plugin", "--profile", profile, "list", "--depth", "0"]);
     const workspace = join(dshHome(), "profiles", profile, "pnpm-workspace.yaml");
-    withPnpmBuildPolicy(workspace, () => runDsh(["plugin", "--profile", profile, "add", `${PACKAGE}@latest`]));
+    withPnpmBuildPolicy(workspace, () => runDsh(["plugin", "--profile", profile, "add", PACKAGE_SPEC]));
   }
   console.log("CodeBuddy Provider 已安装。请重启 DSH 后进行配置。");
 }
