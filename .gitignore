@@ -1,0 +1,6 @@
+node_modules/
+.pack-test/
+*.tgz
+.DS_Store
+Thumbs.db
+*.log

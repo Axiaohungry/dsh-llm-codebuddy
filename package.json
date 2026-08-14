@@ -1,0 +1,56 @@
+{
+  "name": "dsh-llm-codebuddy",
+  "version": "1.2.0",
+  "description": "为 DeepSeek Harness 提供 CodeBuddy 中国区模型接入",
+  "author": "Axiaohungry",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "codebuddy",
+    "llm",
+    "provider"
+  ],
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Axiaohungry/dsh-llm-codebuddy.git"
+  },
+  "homepage": "https://github.com/Axiaohungry/dsh-llm-codebuddy#readme",
+  "bugs": {
+    "url": "https://github.com/Axiaohungry/dsh-llm-codebuddy/issues"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "install.ps1",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "node --check index.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-credentials": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-launch-environment": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
+    "@earendil-works/pi-ai": "0.82.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

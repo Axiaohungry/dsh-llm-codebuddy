@@ -1,0 +1,6 @@
+- id: llm-pi-ai
+  disabled: true
+
+- insert:
+    - id: llm-codebuddy
+      name: dsh-llm-codebuddy
