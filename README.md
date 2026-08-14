@@ -4,10 +4,15 @@
 `CodeBuddy 中国区` Provider。安装后可直接在 DSH WebUI 中填写 API Key、获取模型、
 调整模型参数并使用 CodeBuddy 模型。
 
+> [!IMPORTANT]
+> API Key 由 **WorkBuddy** 提供，本插件使用该 Key 调用供 CodeBuddy 使用的模型服务。
+> DSH 中的 Provider 名称仍为 `CodeBuddy 中国区`。本项目是第三方适配器，并非
+> WorkBuddy、CodeBuddy 或 DSH 官方插件。
+
 ## 功能
 
 - 在“设置 → 模型 → 添加提供方”中显示 `CodeBuddy 中国区`；
-- WebUI 只需要填写 API Key，无需配置 API 地址和协议；
+- WebUI 只需要填写从 WorkBuddy 获取的 API Key，无需配置 API 地址和协议；
 - 从 CodeBuddy `/v3/config` 获取当前 `cli` Agent 可用模型；
 - 支持编辑模型 ID、显示名称、上下文窗口和最大输出 Token；
 - 支持添加、删除模型以及重新同步模型目录；
@@ -50,7 +55,7 @@ dsh plugin --profile headless add github:Axiaohungry/dsh-llm-codebuddy
 也可以安装指定版本：
 
 ```powershell
-dsh plugin --profile web add github:Axiaohungry/dsh-llm-codebuddy#v1.2.0
+dsh plugin --profile web add github:Axiaohungry/dsh-llm-codebuddy#v1.2.1
 ```
 
 ### 从源码安装
@@ -68,7 +73,7 @@ cd dsh-llm-codebuddy
 1. 打开“设置 → 模型”。
 2. 点击“添加提供方”。
 3. 选择 `CodeBuddy 中国区`。
-4. 输入 CodeBuddy API Key 并保存。
+4. 输入从 WorkBuddy 获取的 API Key 并保存。
 5. 点击该 Provider 的“编辑”，展开“自定义设置”。
 6. 点击“获取可用模型”，选择模型并导入。
 7. 按需修改模型参数，然后保存。
@@ -111,8 +116,8 @@ dsh plugin --profile headless add dsh-llm-codebuddy@latest
 GitHub 安装：
 
 ```powershell
-dsh plugin --profile web add github:Axiaohungry/dsh-llm-codebuddy#v1.2.0
-dsh plugin --profile headless add github:Axiaohungry/dsh-llm-codebuddy#v1.2.0
+dsh plugin --profile web add github:Axiaohungry/dsh-llm-codebuddy#v1.2.1
+dsh plugin --profile headless add github:Axiaohungry/dsh-llm-codebuddy#v1.2.1
 ```
 
 ## 卸载
@@ -133,12 +138,12 @@ dsh plugin --profile headless remove dsh-llm-codebuddy
 ```powershell
 git init
 git add .
-git commit -m "发布 dsh-llm-codebuddy v1.2.0"
+git commit -m "发布 dsh-llm-codebuddy v1.2.1"
 git branch -M main
 git remote add origin git@github.com:Axiaohungry/dsh-llm-codebuddy.git
 git push -u origin main
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.2.1
+git push origin v1.2.1
 ```
 
 ### 生成安装包
@@ -151,10 +156,10 @@ npm run check
 npm pack
 ```
 
-会生成类似 `dsh-llm-codebuddy-1.2.0.tgz` 的文件。可以直接测试：
+会生成类似 `dsh-llm-codebuddy-1.2.1.tgz` 的文件。可以直接测试：
 
 ```powershell
-dsh plugin --profile web add .\dsh-llm-codebuddy-1.2.0.tgz
+dsh plugin --profile web add .\dsh-llm-codebuddy-1.2.1.tgz
 ```
 
 ### 发布到 npm
@@ -166,7 +171,7 @@ npm login
 npm publish
 ```
 
-建议在 GitHub 创建与 `package.json` 版本一致的 Release 和 Tag，例如 `v1.2.0`。
+建议在 GitHub 创建与 `package.json` 版本一致的 Release 和 Tag，例如 `v1.2.1`。
 
 ## 安全说明
 
@@ -178,11 +183,14 @@ npm publish
 ## 工作原理
 
 ```text
+WorkBuddy 提供 API Key
+          ↓
 DSH Agent → 本插件 → CodeBuddy /v2/chat/completions
                     ↘ CodeBuddy /v3/config（获取模型）
 ```
 
 - DSH：负责 Agent 循环、上下文、工具调用和权限；
+- WorkBuddy：提供本插件使用的 API Key；
 - 插件：负责 Provider 注册、模型目录转换和请求兼容；
 - CodeBuddy：负责模型推理并返回结果。
 

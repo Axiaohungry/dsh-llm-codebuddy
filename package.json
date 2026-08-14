@@ -1,12 +1,13 @@
 {
   "name": "dsh-llm-codebuddy",
-  "version": "1.2.0",
-  "description": "为 DeepSeek Harness 提供 CodeBuddy 中国区模型接入",
+  "version": "1.2.1",
+  "description": "使用 WorkBuddy API Key 为 DeepSeek Harness 接入 CodeBuddy 模型",
   "author": "Axiaohungry",
   "keywords": [
     "deepseek-harness",
     "dsh",
     "codebuddy",
+    "workbuddy",
     "llm",
     "provider"
   ],
