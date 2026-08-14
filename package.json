@@ -1,6 +1,6 @@
 {
   "name": "dsh-llm-codebuddy",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "使用 WorkBuddy API Key 为 DeepSeek Harness 接入 CodeBuddy 模型",
   "author": "Axiaohungry",
   "keywords": [
@@ -49,7 +49,8 @@
     "@deepseek-ai/dsh-llm-pi-ai": "0.1.0-rc.6",
     "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
     "@earendil-works/pi-ai": "0.82.1",
-    "yaml": "2.8.1"
+    "pnpm": "11.19.0",
+    "yaml": "2.9.0"
   },
   "engines": {
     "node": ">=22.19.0"
