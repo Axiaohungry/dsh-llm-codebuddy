@@ -1,3 +1,5 @@
+2026/08/19 
+发现个人体验版没办法使用apikey了。后续研究一下拉起登录页获取令牌的方式。
 # DSH CodeBuddy Provider
 
 为 DeepSeek Harness（DSH）增加 `CodeBuddy 中国区` Provider。安装后可直接在
