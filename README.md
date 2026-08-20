@@ -214,6 +214,7 @@ DSH Agent → 本插件 → CodeBuddy API（Authorization: Bearer）
 - 插件：负责 Provider 注册、模型目录转换和请求兼容；
 - CodeBuddy：负责模型推理并返回结果。
 <img width="1885" height="853" alt="image" src="https://github.com/user-attachments/assets/eda31b48-8412-414d-b552-1b7ce0a7c3a0" />
+<img width="711" height="380" alt="屏幕截图 2026-08-20 145322" src="https://github.com/user-attachments/assets/541197e8-ac87-47f8-b7ca-f74239ca7c0f" />
 
 ## License
 
