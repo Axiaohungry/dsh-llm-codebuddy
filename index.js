@@ -6,6 +6,15 @@ import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-sett
 import { createProvider } from "@earendil-works/pi-ai";
 import * as openAICompletionsApi from "@earendil-works/pi-ai/api/openai-completions";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import {
+  CODEBUDDY_SESSION_REF,
+  parseCodeBuddySession,
+  refreshCodeBuddySession,
+  serializeCodeBuddySession,
+  sessionCacheDeadline,
+  sessionNeedsRefresh,
+} from "./codebuddy-auth.js";
+import { installCodeBuddyWeb } from "./codebuddy-web.js";
 
 export { Config };
 
@@ -18,7 +27,7 @@ const DISPLAY_NAME = "CodeBuddy 中国区";
 const API_KEY_ENV = "CODEBUDDY_API_KEY";
 const BASE_URL = "https://copilot.tencent.com/v2";
 const CONFIG_URL = "https://copilot.tencent.com/v3/config";
-const USER_AGENT = "CLI/unknown CodeBuddy/2.136.0";
+const USER_AGENT = "CLI/unknown CodeBuddy/2.137.1";
 const STREAM_IDLE_TIMEOUT_MS = 300_000;
 const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"];
@@ -29,6 +38,16 @@ const COMPAT = {
   supportsReasoningEffort: true,
   maxTokensField: "max_tokens",
   thinkingFormat: "openai",
+};
+
+function codeBuddyRequestOptions(options) {
+  return { ...options, headers: { ...(options?.headers ?? {}), "user-agent": USER_AGENT } };
+}
+
+const codeBuddyApi = {
+  ...openAICompletionsApi,
+  stream: (model, context, options) => openAICompletionsApi.stream(model, context, codeBuddyRequestOptions(options)),
+  streamSimple: (model, context, options) => openAICompletionsApi.streamSimple(model, context, codeBuddyRequestOptions(options)),
 };
 
 const FALLBACK_MODELS = [
@@ -133,13 +152,18 @@ function modelsFromConfig(data) {
   });
 }
 
-async function fetchCodeBuddyModels(apiKey, signal) {
+function authenticationHeaders(credential) {
+  const value = assertUsableApiKey(credential.value, name, credential.ref ?? API_KEY_ENV);
+  return credential.kind === "bearer" ? { authorization: `Bearer ${value}` } : { "x-api-key": value };
+}
+
+async function fetchCodeBuddyModels(credential, signal) {
   let response;
   try {
     response = await fetch(CONFIG_URL, {
       headers: {
         accept: "application/json",
-        "x-api-key": assertUsableApiKey(apiKey, name, API_KEY_ENV),
+        ...authenticationHeaders(credential),
         "user-agent": USER_AGENT,
         "x-product": "SaaS",
       },
@@ -164,7 +188,7 @@ function codeBuddyProvider(models, auth) {
     baseUrl: BASE_URL,
     auth,
     models,
-    api: openAICompletionsApi,
+    api: codeBuddyApi,
   });
 }
 
@@ -172,6 +196,7 @@ function resolvedProfile(provider, source, piProvider, configuredMaxTokens = new
   const apiKeyEnv = source.apiKeyEnv === undefined ? undefined : credentialRef(source.apiKeyEnv);
   return {
     ...source,
+    headers: runtimeHeaders(source.headers),
     provider,
     displayName: source.displayName ?? piProvider.name ?? provider,
     ...(apiKeyEnv === undefined ? {} : { apiKeyEnv }),
@@ -216,15 +241,30 @@ function selectCodeBuddyModels(base, entries) {
   });
 }
 
-export const __testing = Object.freeze({ modelsFromConfig, selectCodeBuddyModels });
+function ownsProvider(provider, builtins) {
+  return provider === PROVIDER || builtins.has(provider);
+}
+
+function runtimeHeaders(headers) {
+  return { ...(headers ?? {}) };
+}
+
+function codeBuddySource(config, source) {
+  return Object.hasOwn(config?.providers ?? {}, PROVIDER) ? source : { ...source, apiKeyEnv: source.apiKeyEnv ?? API_KEY_ENV };
+}
+
+export const __testing = Object.freeze({ authenticationHeaders, codeBuddyRequestOptions, codeBuddySource, modelsFromConfig, ownsProvider, runtimeHeaders, selectCodeBuddyModels });
 
 export function apply(ctx, config) {
+  installCodeBuddyWeb(ctx);
   let current = () => config;
   let remoteModels;
   let generation = 0;
   let memoRaw;
   let memoGeneration = -1;
   let memoized;
+  let loginSession;
+  let loginSessionPromise;
   const builtins = new Map(builtinProviders().map((provider) => [provider.id, provider]));
   const apiKeyAuth = builtins.get("deepseek")?.auth;
   if (!apiKeyAuth) throw new Error(`${name}: pi-ai DeepSeek auth helper is unavailable`);
@@ -245,20 +285,20 @@ export function apply(ctx, config) {
     if (memoRaw === current() && memoGeneration === generation && memoized) return memoized;
     const result = new Map();
     for (const [provider, source] of Object.entries(raw.providers)) {
+      if (!ownsProvider(provider, builtins)) continue;
       if (provider === PROVIDER) {
+        const sourceWithAuth = codeBuddySource(current(), source);
         const models = selectCodeBuddyModels(remoteModels ?? FALLBACK_MODELS, source.models);
         const configured = new Map((source.models ?? []).flatMap((model) =>
           Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? [[model.id, model.maxTokens]] : [],
         ));
         result.set(provider, resolvedProfile(provider, {
-          ...source,
-          apiKeyEnv: source.apiKeyEnv ?? API_KEY_ENV,
+          ...sourceWithAuth,
           displayName: DISPLAY_NAME,
         }, codeBuddyProvider(models, apiKeyAuth), configured));
         continue;
       }
       const base = builtins.get(provider);
-      if (!base) throw new Error(`${name}: 不支持非内置 Provider "${provider}"`);
       const selected = selectBuiltinModels(base, source.models);
       const configured = new Map((source.models ?? []).flatMap((model) =>
         Number.isSafeInteger(model.maxTokens) && model.maxTokens > 0 ? [[model.id, model.maxTokens]] : [],
@@ -271,14 +311,53 @@ export function apply(ctx, config) {
     return result;
   };
 
-  const resolveApiKey = async (provider, profile) => {
+  const resolveLoginSession = async () => {
+    if (loginSession?.expiresAt > Date.now()) return loginSession;
+    loginSessionPromise ??= (async () => {
+      const credentials = ctx.get("credentials");
+      const ref = credentialRef(CODEBUDDY_SESSION_REF);
+      const stored = await credentials?.resolve(ref);
+      const value = stored?.value ?? launchEnvironmentOf(ctx).get(ref)?.value;
+      if (!value) throw new Error("未找到 CodeBuddy 登录凭据");
+      let session = parseCodeBuddySession(value);
+      if (sessionNeedsRefresh(session)) {
+        session = await refreshCodeBuddySession(session);
+        await credentials?.set(ref, serializeCodeBuddySession(session));
+      }
+      return { ...session, expiresAt: sessionCacheDeadline(session) };
+    })().finally(() => {
+      loginSessionPromise = undefined;
+    });
+    loginSession = await loginSessionPromise;
+    return loginSession;
+  };
+
+  const resolveCredential = async (provider, profile) => {
     const ref = profile.apiKeyEnv;
-    if (!ref) return undefined;
+    if (!ref && provider === PROVIDER) {
+      let session;
+      try {
+        session = await resolveLoginSession();
+      } catch (error) {
+        throw new LlmError(`${name}: 未找到可用的 CodeBuddy 登录令牌，请运行 dsh-llm-codebuddy login`, "MISSING_CREDENTIAL", { cause: error });
+      }
+      profile.headers ??= {};
+      if (session.account.userId) profile.headers["X-User-Id"] = session.account.userId;
+      if (session.account.enterpriseId) {
+        profile.headers["X-Enterprise-Id"] = session.account.enterpriseId;
+        profile.headers["X-Tenant-Id"] = session.account.enterpriseId;
+      }
+      if (session.auth.domain) profile.headers["X-Domain"] = session.auth.domain;
+      return { value: assertUsableApiKey(session.auth.accessToken, name, "CodeBuddy login session"), kind: "bearer" };
+    }
+    if (!ref) return { value: undefined, kind: "none" };
     const stored = await ctx.get("credentials")?.resolve(ref);
     const value = stored?.value ?? launchEnvironmentOf(ctx).get(ref)?.value;
-    if (value) return assertUsableApiKey(value, name, ref);
+    if (value) return { value: assertUsableApiKey(value, name, ref), kind: "api-key", ref };
     throw new LlmError(`${name}: Provider "${provider}" 缺少 API Key，请在 WebUI 的模型设置中填写`, "MISSING_CREDENTIAL");
   };
+
+  const resolveApiKey = async (provider, profile) => (await resolveCredential(provider, profile)).value;
 
   const adapter = new PiAiAdapter({
     profiles,
@@ -301,8 +380,8 @@ export function apply(ctx, config) {
       refreshPromise ??= (async () => {
         try {
           const profile = profiles().get(PROVIDER);
-          const apiKey = await resolveApiKey(PROVIDER, profile);
-          remoteModels = await fetchCodeBuddyModels(apiKey);
+          const credential = await resolveCredential(PROVIDER, profile);
+          remoteModels = await fetchCodeBuddyModels(credential);
           generation += 1;
         } catch {
           // Keep the built-in catalog available while the key or network is absent.
@@ -333,8 +412,10 @@ export function apply(ctx, config) {
   ctx.llm.registerModelDiscovery(NS, async (request) => {
     if (request.provider === PROVIDER) {
       const profile = profiles().get(PROVIDER);
-      const apiKey = request.apiKey ?? await resolveApiKey(PROVIDER, profile);
-      remoteModels = await fetchCodeBuddyModels(apiKey, request.signal);
+      const credential = request.apiKey
+        ? { value: request.apiKey, kind: "api-key", ref: API_KEY_ENV }
+        : await resolveCredential(PROVIDER, profile);
+      remoteModels = await fetchCodeBuddyModels(credential, request.signal);
       generation += 1;
       return remoteModels.map((model) => ({
         id: model.id,

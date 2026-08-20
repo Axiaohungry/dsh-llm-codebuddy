@@ -1,7 +1,8 @@
 # DSH CodeBuddy Provider
 
-为 DeepSeek Harness（DSH）增加 `CodeBuddy 中国区` Provider。安装后可直接在
-DSH WebUI 中填写 API Key、获取模型、调整模型参数并使用 CodeBuddy 模型。
+为 DeepSeek Harness（DSH）增加 `CodeBuddy 中国区` Provider。支持 WorkBuddy
+API Key 和 CodeBuddy 中国站账号令牌两种认证方式，并可在 DSH WebUI 中获取、
+选择和调整模型。
 
 > [!IMPORTANT]
 > API Key 由 **WorkBuddy** 提供，本插件使用该 Key 调用供 CodeBuddy 使用的模型服务。
@@ -11,7 +12,9 @@ DSH WebUI 中填写 API Key、获取模型、调整模型参数并使用 CodeBud
 ## 功能
 
 - WebUI 中直接添加 `CodeBuddy 中国区`；
-- 只需填写从 WorkBuddy 获取的 API Key；
+- 支持从 WorkBuddy 获取的 API Key；
+- API Key 输入框旁可显式切换 `API Key` / `令牌登录`；
+- 支持从 WebUI 拉起浏览器登录 CodeBuddy 中国站，并自动复用、刷新登录令牌；
 - 自动获取 CodeBuddy 当前可用模型；
 - 支持编辑模型 ID、名称、上下文窗口和最大输出 Token；
 - 支持添加、删除模型以及重新同步模型目录；
@@ -27,7 +30,7 @@ DSH WebUI 中填写 API Key、获取模型、调整模型参数并使用 CodeBud
 - 已安装 DSH；
 - 已验证 DSH `0.1.0-rc.6`。
 
-安装器已自带 DSH 所需的 `pnpm`，无需全局安装。
+安装器已自带 DSH 所需的 `pnpm`，无需全局安装；令牌登录也不需要安装 CodeBuddy CLI。
 
 > DSH 仍处于预发布阶段。未来版本如果调整插件接口，本插件可能需要同步升级；
 > DSH 普通更新不会覆盖本插件。
@@ -52,6 +55,32 @@ dsh plugin --profile headless add dsh-llm-codebuddy@latest
 只使用 WebUI 时，仅执行第一条即可。
 
 ## WebUI 配置
+
+### CodeBuddy 账号令牌登录（新用户推荐）
+
+1. 打开“设置 → 模型”。
+2. 添加或编辑 `CodeBuddy 中国区`。
+3. 点击 API Key 输入框右侧的“令牌登录”。
+4. 在自动打开的浏览器中完成 CodeBuddy 中国站登录。
+5. WebUI 显示“令牌已登录”后即可获取模型并保存自定义目录。
+
+如果 WebUI 无法打开浏览器，也可以使用命令行入口：
+
+```powershell
+npx --yes dsh-llm-codebuddy@latest login
+```
+
+插件会调用 CodeBuddy 官方认证流程。完成登录后，插件会自动把
+`CodeBuddy 中国区` Provider 切换为令牌模式，无需 API Key。点击同一行的
+“API Key”可以切回 API Key 模式；已经保存的 API Key 不会被删除。
+两种凭据彼此独立保留，之后再次点击“令牌登录”会优先复用已保存令牌；仅在没有
+令牌或主动重新登录时才需要再次打开浏览器。
+
+插件直接调用 CodeBuddy 中国站官方网页登录和令牌刷新接口，不依赖本机
+`codebuddy` 命令。访问令牌和刷新令牌保存在 DSH 凭据服务中，不会写入
+`settings.yaml` 或模型目录。
+
+### WorkBuddy API Key
 
 1. 打开“设置 → 模型”。
 2. 点击“添加提供方”。
@@ -116,7 +145,7 @@ npx --yes dsh-llm-codebuddy@latest uninstall
 2. 只删除 `llm-pi-ai.providers.codebuddy-cn` 配置；
 3. 保留其他 Provider 和 DSH 设置；
 4. 从 `web`、`headless` Profile 移除插件；
-5. 保留 API Key 凭据，方便以后重新安装。
+5. 保留 API Key 和登录令牌凭据，方便以后重新安装。
 
 完成后重启 DSH。备份文件名类似：
 
@@ -147,14 +176,25 @@ dsh plugin --profile web list --depth 0
 当前 Key 返回的模型；更换 Key 后请重新点击“获取可用模型”。插件不会强行显示
 当前 Key 未授权的模型。
 
-## 开发文档
+### 调用时报 `500 status code (no body)`
 
-需要开发其他 Agent 或 Provider 时，请阅读
-[CodeBuddy 调用 WorkBuddy API 开发文档](./docs/CodeBuddy调用WorkBuddy-API开发文档.md)。
+先更新到最新版并重启 DSH：
+
+```powershell
+npx --yes dsh-llm-codebuddy@latest install
+```
+
+旧版本可能被 DSH 覆盖 CodeBuddy 请求标识，导致服务端拒绝请求；最新版已在插件请求层
+恢复 CodeBuddy 官方标识，同时适用于 API Key 和令牌模式。
 
 ### 卸载后仍显示旧页面
 
 关闭正在运行的 DSH，再重新启动。已经运行的进程不会自动卸载内存中的插件。
+
+## 开发文档
+
+需要开发其他 Agent 或 Provider 时，请阅读
+[反向代理调用 WorkBuddy API 开发文档](./docs/反向代理调用WorkBuddy-API开发文档.md)。
 
 ## 工作原理
 
@@ -163,6 +203,10 @@ WorkBuddy 提供 API Key
           ↓
 DSH Agent → 本插件 → CodeBuddy /v2/chat/completions
                     ↘ CodeBuddy /v3/config（获取模型）
+
+CodeBuddy 中国站网页登录 → 本插件保存并刷新 DSH 登录凭据
+                              ↓ 当前 access token
+DSH Agent → 本插件 → CodeBuddy API（Authorization: Bearer）
 ```
 
 - DSH：负责 Agent 循环、上下文、工具调用和权限；

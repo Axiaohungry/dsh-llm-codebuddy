@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseDocument } from "yaml";
+import { CODEBUDDY_SESSION_REF, loginCodeBuddy, parseCodeBuddySession, serializeCodeBuddySession } from "./codebuddy-auth.js";
 
 const PACKAGE = "dsh-llm-codebuddy";
 const PACKAGE_VERSION = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
@@ -110,6 +111,43 @@ function cleanSettings(file) {
   return backup;
 }
 
+function enableTokenLogin(home = dshHome()) {
+  const file = join(home, "settings.yaml");
+  const source = existsSync(file) ? readFileSync(file, "utf8") : "{}\n";
+  const document = parseDocument(source);
+  if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
+  if (document.hasIn(PROVIDER_PATH)) document.deleteIn([...PROVIDER_PATH, "apiKeyEnv"]);
+  else document.setIn(PROVIDER_PATH, {});
+  if (existsSync(file)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    copyFileSync(file, `${file}.codebuddy-backup-${stamp}`);
+  }
+  writeYamlDocument(file, document);
+}
+
+function storeLoginSession(session, home = dshHome()) {
+  const file = join(home, ".credentials.yaml");
+  const document = parseDocument(existsSync(file) ? readFileSync(file, "utf8") : "{}\n");
+  if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
+  document.set(CODEBUDDY_SESSION_REF, serializeCodeBuddySession(session));
+  if (existsSync(file)) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    copyFileSync(file, `${file}.codebuddy-backup-${stamp}`);
+  }
+  writeYamlDocument(file, document);
+}
+
+async function login() {
+  console.log("正在打开 CodeBuddy 中国站网页登录（无需安装 CodeBuddy CLI）……");
+  const session = await loginCodeBuddy((url, opened) => {
+    if (opened) console.log("浏览器登录页已打开，请在浏览器中完成登录。");
+    else console.log(`无法自动打开浏览器，请手动访问：${url}`);
+  });
+  storeLoginSession(session);
+  enableTokenLogin();
+  console.log("CodeBuddy 令牌登录成功，Provider 已切换为令牌模式。请重启 DSH。");
+}
+
 function install() {
   for (const profile of ["web", "headless"]) {
     runDsh(["plugin", "--profile", profile, "list", "--depth", "0"]);
@@ -129,7 +167,7 @@ function uninstall(home = dshHome()) {
     cleanPnpmWorkspace(workspace);
   }
   console.log(backup ? `CodeBuddy 配置已清理，备份：${backup}` : "未发现 CodeBuddy Provider 配置。");
-  console.log("插件已卸载，API Key 凭据保持不变。请重启 DSH。");
+  console.log("插件已卸载，API Key 和登录令牌凭据保持不变。请重启 DSH。");
 }
 
 function selfTest() {
@@ -137,10 +175,28 @@ function selfTest() {
   try {
     const file = join(root, "settings.yaml");
     writeFileSync(file, "llm-pi-ai:\n  providers:\n    opencode-go:\n      apiKeyEnv: OPENCODE_GO_API_KEY\n    codebuddy-cn:\n      apiKeyEnv: CODEBUDDY_CN_API_KEY\n", "utf8");
+    enableTokenLogin(root);
+    const tokenMode = parseDocument(readFileSync(file, "utf8"));
+    if (tokenMode.hasIn([...PROVIDER_PATH, "apiKeyEnv"]) || !tokenMode.hasIn(PROVIDER_PATH)) {
+      throw new Error("token login settings self-test failed");
+    }
     const backup = cleanSettings(file);
     const result = parseDocument(readFileSync(file, "utf8"));
     if (!backup || !existsSync(backup) || result.hasIn(PROVIDER_PATH) || !result.hasIn(["llm-pi-ai", "providers", "opencode-go"])) {
       throw new Error("uninstall settings cleanup self-test failed");
+    }
+    enableTokenLogin(root);
+    if (!parseDocument(readFileSync(file, "utf8")).hasIn(PROVIDER_PATH)) {
+      throw new Error("token login provider creation self-test failed");
+    }
+    const sampleSession = {
+      auth: { accessToken: "test-access-token", refreshToken: "test-refresh-token", expiresAt: Date.now() + 60_000 },
+      account: { userId: "test-user" },
+    };
+    storeLoginSession(sampleSession, root);
+    const storedSession = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(CODEBUDDY_SESSION_REF);
+    if (parseCodeBuddySession(storedSession).account.userId !== "test-user") {
+      throw new Error("token credential storage self-test failed");
     }
     const workspace = join(root, "pnpm-workspace.yaml");
     writeFileSync(workspace, "packages:\n  - .\nallowBuilds:\n  '@google/genai': true\n  protobufjs: pending\n", "utf8");
@@ -172,8 +228,9 @@ function selfTest() {
 const command = process.argv[2];
 if (command === "install") install();
 else if (command === "uninstall") uninstall();
+else if (command === "login") await login();
 else if (command === "--self-test") selfTest();
 else {
-  console.log("用法：dsh-llm-codebuddy <install|uninstall>");
+  console.log("用法：dsh-llm-codebuddy <install|login|uninstall>");
   process.exitCode = 1;
 }
