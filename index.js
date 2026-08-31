@@ -263,11 +263,12 @@ function installSettingsCompat(ctx, ns, schema, entry, hooks) {
   if (typeof dshSettings.installSettingsSection === "function") {
     return dshSettings.installSettingsSection(ctx, ns, schema, entry, hooks);
   }
-  const settings = ctx.get("settings");
-  if (!settings || typeof settings.installSection !== "function") {
-    throw new Error(`${name}: DSH settings service does not provide installSection`);
-  }
-  return settings.installSection(ctx, ns, schema, entry, hooks);
+  return ctx.inject(["settings"], (settingsCtx) => {
+    if (!settingsCtx.settings || typeof settingsCtx.settings.installSection !== "function") {
+      throw new Error(`${name}: DSH settings service does not provide installSection`);
+    }
+    return settingsCtx.settings.installSection(ctx, ns, schema, entry, hooks);
+  });
 }
 
 export const __testing = Object.freeze({ authenticationHeaders, codeBuddyRequestOptions, codeBuddySource, modelsFromConfig, ownsProvider, runtimeHeaders, selectCodeBuddyModels });
