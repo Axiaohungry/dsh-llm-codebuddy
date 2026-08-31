@@ -2,7 +2,7 @@ import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import { launchEnvironmentOf } from "@deepseek-ai/dsh-launch-environment";
 import { LlmError, assertUsableApiKey, resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
 import { Config, PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+import * as dshSettings from "@deepseek-ai/dsh-settings";
 import { createProvider } from "@earendil-works/pi-ai";
 import * as openAICompletionsApi from "@earendil-works/pi-ai/api/openai-completions";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
@@ -27,7 +27,7 @@ export { Config };
 export const name = "llm-codebuddy";
 export const inject = ["llm"];
 
-const NS = settingsNamespace("llm-pi-ai");
+const NS = typeof dshSettings.settingsNamespace === "function" ? dshSettings.settingsNamespace("llm-pi-ai") : "llm-pi-ai";
 const PROVIDER = "codebuddy-cn";
 const DISPLAY_NAME = "CodeBuddy 中国区";
 const API_KEY_ENV = "CODEBUDDY_API_KEY";
@@ -259,6 +259,17 @@ function codeBuddySource(config, source) {
   return Object.hasOwn(config?.providers ?? {}, PROVIDER) ? source : { ...source, apiKeyEnv: source.apiKeyEnv ?? API_KEY_ENV };
 }
 
+function installSettingsCompat(ctx, ns, schema, entry, hooks) {
+  if (typeof dshSettings.installSettingsSection === "function") {
+    return dshSettings.installSettingsSection(ctx, ns, schema, entry, hooks);
+  }
+  const settings = ctx.get("settings");
+  if (!settings || typeof settings.installSection !== "function") {
+    throw new Error(`${name}: DSH settings service does not provide installSection`);
+  }
+  return settings.installSection(ctx, ns, schema, entry, hooks);
+}
+
 export const __testing = Object.freeze({ authenticationHeaders, codeBuddyRequestOptions, codeBuddySource, modelsFromConfig, ownsProvider, runtimeHeaders, selectCodeBuddyModels });
 
 export function apply(ctx, config) {
@@ -462,7 +473,7 @@ export function apply(ctx, config) {
   // Keep CodeBuddy out of the settings base layer so it appears in WebUI's
   // "Add provider" dropdown. The runtime profile above still exists as the
   // built-in implementation; selecting it only persists the credential ref.
-  installSettingsSection(ctx, NS, Config, config ?? { providers: {} }, {
+  installSettingsCompat(ctx, NS, Config, config ?? { providers: {} }, {
     setSource(source) {
       current = source;
     },

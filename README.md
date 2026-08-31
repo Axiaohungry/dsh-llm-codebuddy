@@ -27,7 +27,8 @@ DSH WebUI 中管理模型和认证方式。
 - Node.js `>= 22.19.0`；
 - Windows、Linux 或 macOS。
 
-插件 `1.3.7` 及以上版本要求 DSH `>= 0.1.2-alpha.2`。该版本不再携带旧版 DSH
+插件 `1.3.7` 及以上版本要求 DSH `>= 0.1.2-alpha.2`。`1.3.8` 起兼容新版 DSH
+的 settings 注册接口。该版本不再携带旧版 DSH
 运行时副本，而是复用宿主 DSH 的运行时，避免更新 DSH 后出现 Provider 目录接口
 （`llm/listProviders`）不兼容。升级插件后请重新安装一次并重启 DSH。
 
