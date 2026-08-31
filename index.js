@@ -8,11 +8,17 @@ import * as openAICompletionsApi from "@earendil-works/pi-ai/api/openai-completi
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import {
   CODEBUDDY_SESSION_REF,
+  CODEBUDDY_SESSIONS_REF,
+  activeCodeBuddySession,
+  createCodeBuddySessionStore,
   parseCodeBuddySession,
+  parseCodeBuddySessions,
   refreshCodeBuddySession,
   serializeCodeBuddySession,
+  serializeCodeBuddySessions,
   sessionCacheDeadline,
   sessionNeedsRefresh,
+  upsertCodeBuddySession,
 } from "./codebuddy-auth.js";
 import { installCodeBuddyWeb } from "./codebuddy-web.js";
 
@@ -263,8 +269,8 @@ export function apply(ctx, config) {
   let memoRaw;
   let memoGeneration = -1;
   let memoized;
-  let loginSession;
   let loginSessionPromise;
+  let remoteModelsKey;
   const builtins = new Map(builtinProviders().map((provider) => [provider.id, provider]));
   const apiKeyAuth = builtins.get("deepseek")?.auth;
   if (!apiKeyAuth) throw new Error(`${name}: pi-ai DeepSeek auth helper is unavailable`);
@@ -312,24 +318,37 @@ export function apply(ctx, config) {
   };
 
   const resolveLoginSession = async () => {
-    if (loginSession?.expiresAt > Date.now()) return loginSession;
     loginSessionPromise ??= (async () => {
       const credentials = ctx.get("credentials");
-      const ref = credentialRef(CODEBUDDY_SESSION_REF);
-      const stored = await credentials?.resolve(ref);
-      const value = stored?.value ?? launchEnvironmentOf(ctx).get(ref)?.value;
-      if (!value) throw new Error("未找到 CodeBuddy 登录凭据");
-      let session = parseCodeBuddySession(value);
-      if (sessionNeedsRefresh(session)) {
-        session = await refreshCodeBuddySession(session);
-        await credentials?.set(ref, serializeCodeBuddySession(session));
+      const env = launchEnvironmentOf(ctx);
+      const sessionsRef = credentialRef(CODEBUDDY_SESSIONS_REF);
+      const storedSessions = await credentials?.resolve(sessionsRef);
+      const sessionsValue = storedSessions?.value ?? env.get(sessionsRef)?.value;
+      let store;
+      if (sessionsValue) {
+        store = parseCodeBuddySessions(sessionsValue);
+      } else {
+        const legacyRef = credentialRef(CODEBUDDY_SESSION_REF);
+        const storedLegacy = await credentials?.resolve(legacyRef);
+        const legacyValue = storedLegacy?.value ?? env.get(legacyRef)?.value;
+        if (!legacyValue) throw new Error("未找到 CodeBuddy 登录凭据");
+        const legacy = parseCodeBuddySession(legacyValue);
+        store = createCodeBuddySessionStore([legacy]);
       }
-      return { ...session, expiresAt: sessionCacheDeadline(session) };
+      const active = activeCodeBuddySession(store);
+      if (!active) throw new Error("未找到 CodeBuddy 登录账号");
+      let session = active;
+      if (sessionNeedsRefresh(session)) {
+        session = { ...session, ...(await refreshCodeBuddySession(session)), updatedAt: Date.now() };
+        const nextStore = upsertCodeBuddySession({ ...store, activeId: active.id }, session);
+        await credentials?.set(sessionsRef, serializeCodeBuddySessions(nextStore));
+        await credentials?.set(credentialRef(CODEBUDDY_SESSION_REF), serializeCodeBuddySession(session));
+      }
+      return { ...session, sessionId: active.id, expiresAt: sessionCacheDeadline(session) };
     })().finally(() => {
       loginSessionPromise = undefined;
     });
-    loginSession = await loginSessionPromise;
-    return loginSession;
+    return loginSessionPromise;
   };
 
   const resolveCredential = async (provider, profile) => {
@@ -348,7 +367,7 @@ export function apply(ctx, config) {
         profile.headers["X-Tenant-Id"] = session.account.enterpriseId;
       }
       if (session.auth.domain) profile.headers["X-Domain"] = session.auth.domain;
-      return { value: assertUsableApiKey(session.auth.accessToken, name, "CodeBuddy login session"), kind: "bearer" };
+      return { value: assertUsableApiKey(session.auth.accessToken, name, "CodeBuddy login session"), kind: "bearer", sessionId: session.sessionId };
     }
     if (!ref) return { value: undefined, kind: "none" };
     const stored = await ctx.get("credentials")?.resolve(ref);
@@ -376,17 +395,22 @@ export function apply(ctx, config) {
   const listModels = adapter.listModels.bind(adapter);
   let refreshPromise;
   adapter.listModels = async (provider) => {
-    if (provider === PROVIDER && !remoteModels) {
+    if (provider === PROVIDER) {
       refreshPromise ??= (async () => {
         try {
           const profile = profiles().get(PROVIDER);
           const credential = await resolveCredential(PROVIDER, profile);
+          const cacheKey = credential.kind === "bearer" ? `token:${credential.sessionId ?? "active"}` : `api:${credential.ref ?? API_KEY_ENV}`;
+          if (remoteModels && remoteModelsKey === cacheKey) return;
           remoteModels = await fetchCodeBuddyModels(credential);
+          remoteModelsKey = cacheKey;
           generation += 1;
         } catch {
           // Keep the built-in catalog available while the key or network is absent.
         }
-      })();
+      })().finally(() => {
+        refreshPromise = undefined;
+      });
       await refreshPromise;
     }
     return listModels(provider);
@@ -416,6 +440,7 @@ export function apply(ctx, config) {
         ? { value: request.apiKey, kind: "api-key", ref: API_KEY_ENV }
         : await resolveCredential(PROVIDER, profile);
       remoteModels = await fetchCodeBuddyModels(credential, request.signal);
+      remoteModelsKey = credential.kind === "bearer" ? `token:${credential.sessionId ?? "active"}` : `api:${credential.ref ?? API_KEY_ENV}`;
       generation += 1;
       return remoteModels.map((model) => ({
         id: model.id,

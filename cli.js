@@ -6,7 +6,17 @@ import { createRequire } from "node:module";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseDocument } from "yaml";
-import { CODEBUDDY_SESSION_REF, loginCodeBuddy, parseCodeBuddySession, serializeCodeBuddySession } from "./codebuddy-auth.js";
+import {
+  CODEBUDDY_SESSION_REF,
+  CODEBUDDY_SESSIONS_REF,
+  createCodeBuddySessionStore,
+  loginCodeBuddy,
+  parseCodeBuddySession,
+  parseCodeBuddySessions,
+  serializeCodeBuddySession,
+  serializeCodeBuddySessions,
+  upsertCodeBuddySession,
+} from "./codebuddy-auth.js";
 
 const PACKAGE = "dsh-llm-codebuddy";
 const PACKAGE_VERSION = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
@@ -129,7 +139,11 @@ function storeLoginSession(session, home = dshHome()) {
   const file = join(home, ".credentials.yaml");
   const document = parseDocument(existsSync(file) ? readFileSync(file, "utf8") : "{}\n");
   if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
-  document.set(CODEBUDDY_SESSION_REF, serializeCodeBuddySession(session));
+  const stored = document.get(CODEBUDDY_SESSIONS_REF) ?? document.get(CODEBUDDY_SESSION_REF);
+  const current = stored ? parseCodeBuddySessions(stored) : createCodeBuddySessionStore();
+  const next = upsertCodeBuddySession(current, session);
+  document.set(CODEBUDDY_SESSIONS_REF, serializeCodeBuddySessions(next));
+  document.set(CODEBUDDY_SESSION_REF, serializeCodeBuddySession(next.sessions.find((entry) => entry.id === next.activeId)));
   if (existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     copyFileSync(file, `${file}.codebuddy-backup-${stamp}`);
@@ -197,6 +211,11 @@ function selfTest() {
     const storedSession = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(CODEBUDDY_SESSION_REF);
     if (parseCodeBuddySession(storedSession).account.userId !== "test-user") {
       throw new Error("token credential storage self-test failed");
+    }
+    const storedSessions = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(CODEBUDDY_SESSIONS_REF);
+    const sessionStore = parseCodeBuddySessions(storedSessions);
+    if (sessionStore.sessions.length !== 1 || sessionStore.activeId !== sessionStore.sessions[0].id) {
+      throw new Error("token account list self-test failed");
     }
     const workspace = join(root, "pnpm-workspace.yaml");
     writeFileSync(workspace, "packages:\n  - .\nallowBuilds:\n  '@google/genai': true\n  protobufjs: pending\n", "utf8");

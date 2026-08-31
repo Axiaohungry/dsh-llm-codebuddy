@@ -1,8 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { __testing } from "./index.js";
-import { parseCodeBuddySession, refreshCodeBuddySession, serializeCodeBuddySession, sessionNeedsRefresh } from "./codebuddy-auth.js";
+import {
+  codeBuddyApiKeyEntries,
+  activeCodeBuddySession,
+  codeBuddySessionAccounts,
+  createCodeBuddyApiKeyStore,
+  createCodeBuddySessionStore,
+  parseCodeBuddyApiKeys,
+  parseCodeBuddySession,
+  parseCodeBuddySessions,
+  refreshCodeBuddySession,
+  serializeCodeBuddyApiKeys,
+  serializeCodeBuddySession,
+  serializeCodeBuddySessions,
+  sessionNeedsRefresh,
+  upsertCodeBuddyApiKey,
+  upsertCodeBuddySession,
+} from "./codebuddy-auth.js";
 import { authenticationMode } from "./codebuddy-web.js";
+import { __testing as creditsTesting, fetchCodeBuddyCredits } from "./codebuddy-credits.js";
 
 test("忽略由其他插件负责的 Provider", () => {
   const builtins = new Map([["deepseek", {}]]);
@@ -52,6 +69,63 @@ test("登录会话可以安全序列化并按过期时间刷新", () => {
   assert.deepEqual(restored.account, { userId: "user", enterpriseId: "enterprise" });
   assert.equal(sessionNeedsRefresh(restored, 1_000_000), false);
   assert.equal(sessionNeedsRefresh(restored, 1_900_000), true);
+});
+
+test("多个登录账号可以持久化、去重并切换", () => {
+  const first = { auth: { accessToken: "access-1", refreshToken: "refresh-1" }, account: { userId: "user-1" } };
+  const second = { auth: { accessToken: "access-2", refreshToken: "refresh-2" }, account: { userId: "user-2" } };
+  const store = upsertCodeBuddySession(upsertCodeBuddySession(createCodeBuddySessionStore(), first), second);
+  const restored = parseCodeBuddySessions(serializeCodeBuddySessions({ ...store, activeId: store.sessions[0].id }));
+  assert.equal(restored.sessions.length, 2);
+  assert.equal(activeCodeBuddySession(restored).account.userId, "user-1");
+  assert.deepEqual(codeBuddySessionAccounts(restored).map((entry) => entry.label), ["user-1", "user-2"]);
+  assert.equal(JSON.stringify(codeBuddySessionAccounts(restored)).includes("refresh-1"), false);
+  const replaced = upsertCodeBuddySession(restored, { ...first, auth: { accessToken: "access-1-new", refreshToken: "refresh-1-new" } });
+  assert.equal(replaced.sessions.length, 2);
+  assert.equal(replaced.sessions.find((entry) => entry.id === "user:user-1").auth.accessToken, "access-1-new");
+});
+
+test("新增登录账号统一生成账号名称和 UID 展示字段", () => {
+  const session = {
+    auth: { accessToken: "access-new", refreshToken: "refresh-new" },
+    account: { account: { uid: "new-user-id", nickname: "新账号" } },
+  };
+  const store = upsertCodeBuddySession(createCodeBuddySessionStore(), session);
+  const [account] = codeBuddySessionAccounts(store);
+
+  assert.equal(account.label, "新账号");
+  assert.equal(account.accountName, "新账号");
+  assert.equal(account.userId, "new-user-id");
+  assert.equal(account.account.displayName, "新账号");
+  assert.equal(account.account.userId, "new-user-id");
+});
+
+test("账号接口缺少名称时从 UIN 或登录令牌补齐展示信息", () => {
+  const payload = Buffer.from(JSON.stringify({ sub: "jwt-user-id", preferred_username: "jwt-account" })).toString("base64url");
+  const session = {
+    auth: { accessToken: `header.${payload}.signature`, refreshToken: "refresh-jwt" },
+    account: { uin: "uin-account" },
+  };
+  const store = upsertCodeBuddySession(createCodeBuddySessionStore(), session);
+  const [account] = codeBuddySessionAccounts(store);
+
+  assert.equal(account.label, "uin-account");
+  assert.equal(account.userId, "jwt-user-id");
+  assert.equal(account.account.displayName, "uin-account");
+  assert.equal(account.account.uin, "uin-account");
+});
+
+test("API Key 目录只保存引用和展示元数据，不保存密钥值", () => {
+  const store = upsertCodeBuddyApiKey(createCodeBuddyApiKeyStore(), {
+    id: "dsh:CODEBUDDY_API_KEY_DSH_TEST",
+    ref: "CODEBUDDY_API_KEY_DSH_TEST",
+    label: "DSH API Key 1",
+  });
+  const restored = parseCodeBuddyApiKeys(serializeCodeBuddyApiKeys(store));
+  assert.deepEqual(codeBuddyApiKeyEntries(restored).map((entry) => entry.ref), ["CODEBUDDY_API_KEY_DSH_TEST"]);
+  assert.equal(JSON.stringify(codeBuddyApiKeyEntries(restored)).includes("secret"), false);
+  const noActive = createCodeBuddyApiKeyStore(restored.entries, null);
+  assert.equal(noActive.activeId, null);
 });
 
 test("插件直接调用官方刷新接口且不复用旧过期时间", async () => {
@@ -108,4 +182,54 @@ test("自定义模型可覆盖自己的思考档位", () => {
   assert.equal(Object.hasOwn(model.thinkingLevelMap, "off"), false);
   assert.equal(model.thinkingLevelMap.medium, "balanced");
   assert.equal(model.thinkingLevelMap.high, null);
+});
+
+test("积分查询复用 CodeBuddy billing 接口并汇总有效资源", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    if (String(url).includes("get-user-resource")) {
+      return new Response(JSON.stringify({ code: 0, data: { Response: { Data: { Accounts: [
+        { CycleCapacityRemainPrecise: 12.5, CapacityRemainPrecise: 100, PackageName: "月度包" },
+        { CapacityRemain: 7 },
+      ] } } } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ code: 0, data: { total: 2, data: [
+      { requestId: "r1", requestTime: Date.now(), credit: 1.25 },
+      { requestId: "r2", requestTime: Date.now() - 1000, credit: 2.75 },
+    ] } }), { status: 200 });
+  };
+  try {
+    const result = await fetchCodeBuddyCredits({ auth: { accessToken: "token" }, account: { userId: "user" } });
+    assert.equal(result.credits, 19.5);
+    assert.equal(result.todayUsage.count, 2);
+    assert.equal(result.todayUsage.used, 4);
+    assert.equal(result.creditError, null);
+    assert.equal(requests[0].url, "https://www.codebuddy.cn/v2/billing/meter/get-user-resource");
+    assert.equal(requests[0].options.headers.authorization, "Bearer token");
+    assert.equal(requests[1].url, "https://www.codebuddy.cn/billing/meter/get-user-request-usage");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("企业积分响应支持不限量和周期重置时间", () => {
+  const result = creditsTesting.enterpriseUsage({ data: { limitNum: -1, cycleResetTime: "2026-09-01 00:00:00" } });
+  assert.equal(result.unlimited, true);
+  assert.equal(result.credits, null);
+  assert.ok(Number.isFinite(result.cycleResetTime));
+});
+
+test("积分查询只接受受信任的 CodeBuddy/WorkBuddy billing 域名", () => {
+  assert.equal(creditsTesting.normalizeHost("https://www.codebuddy.cn"), "https://www.codebuddy.cn");
+  assert.equal(creditsTesting.normalizeHost("https://evil.example"), "https://www.codebuddy.cn");
+  assert.deepEqual(creditsTesting.buildCreditResourceBody(new Date(2026, 7, 31, 9, 8, 7)), {
+    PageNumber: 1,
+    PageSize: 100,
+    ProductCode: "p_tcaca",
+    Status: [0, 3],
+    PackageEndTimeRangeBegin: "2026-08-31 09:08:07",
+    PackageEndTimeRangeEnd: "2127-08-31 09:08:07",
+  });
 });

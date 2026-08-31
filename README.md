@@ -1,137 +1,141 @@
 # DSH CodeBuddy Provider
 
-为 DeepSeek Harness（DSH）增加 `CodeBuddy 中国区` Provider。支持 WorkBuddy
-API Key 和 CodeBuddy 中国站账号令牌两种认证方式，并可在 DSH WebUI 中获取、
-选择和调整模型。
+为 DeepSeek Harness（DSH）增加 `CodeBuddy 中国区` Provider。插件通过
+WorkBuddy 提供的 API Key，或 CodeBuddy 中国站的网页登录令牌调用模型，并在
+DSH WebUI 中管理模型和认证方式。
 
 > [!IMPORTANT]
-> API Key 由 **WorkBuddy** 提供，本插件使用该 Key 调用供 CodeBuddy 使用的模型服务。
-> DSH 中的 Provider 名称仍为 `CodeBuddy 中国区`。本项目是第三方适配器，并非
-> WorkBuddy、CodeBuddy 或 DSH 官方插件。
+> API Key 来自 **WorkBuddy**，用于调用供 CodeBuddy 使用的模型服务。本插件是第三方
+> 适配器，不属于 WorkBuddy、CodeBuddy 或 DSH 官方项目。
 
 ## 功能
 
-- WebUI 中直接添加 `CodeBuddy 中国区`；
-- 支持从 WorkBuddy 获取的 API Key；
-- API Key 输入框旁可显式切换 `API Key` / `令牌登录`；
-- 支持从 WebUI 拉起浏览器登录 CodeBuddy 中国站，并自动复用、刷新登录令牌；
-- 自动获取 CodeBuddy 当前可用模型；
-- 支持编辑模型 ID、名称、上下文窗口和最大输出 Token；
-- 支持添加、删除模型以及重新同步模型目录；
-- 按模型目录声明各模型自己的思考能力、可选档位和默认档位；
-- 输入新 API Key 可替换旧值，留空保存则保留原值；
-- 模型接口暂时不可用时使用内置目录兜底；
-- 独立安装，不修改 DSH 全局安装目录。
+- 在 DSH WebUI 中使用 `CodeBuddy 中国区`；
+- 支持 WorkBuddy API Key 和 CodeBuddy 中国站账号令牌；
+- 两种认证模式互相独立，可以随时切换；
+- API Key 支持环境变量、多个 DSH 保存值，并可通过下拉列表切换；
+- 令牌支持浏览器登录、多个账号持久化、账号名称展示和下拉切换；
+- 令牌模式显示剩余积分、今日请求次数和今日积分用量；
+- 自动从 CodeBuddy 获取当前账号可用模型；
+- 支持编辑模型 ID、名称、上下文窗口、最大输出 Token 和模型思考档位；
+- 支持添加、删除模型以及恢复在线模型目录；
+- 不依赖本机 CodeBuddy CLI。
 
 ## 环境要求
 
-- Windows、Linux 或 macOS；
-- Node.js `>= 22.19.0`；
 - 已安装 DSH；
-- 已验证 DSH `0.1.0-rc.6`。
-
-安装器已自带 DSH 所需的 `pnpm`，无需全局安装；令牌登录也不需要安装 CodeBuddy CLI。
-
-> DSH 仍处于预发布阶段。未来版本如果调整插件接口，本插件可能需要同步升级；
-> DSH 普通更新不会覆盖本插件。
+- Node.js `>= 22.19.0`；
+- Windows、Linux 或 macOS。
 
 ## 安装
 
-推荐使用一键安装命令：
+在 PowerShell 或终端执行：
 
 ```powershell
 npx --yes dsh-llm-codebuddy@latest install
 ```
 
-该命令会为 DSH 的 `web` 和 `headless` Profile 安装插件。完成后重启 DSH。
-
-也可以分别安装：
+安装器会为 DSH 的 `web` 和 `headless` Profile 安装插件。安装完成后重启 DSH。
+只使用 WebUI 时，也可以单独安装 Web Profile：
 
 ```powershell
 dsh plugin --profile web add dsh-llm-codebuddy@latest
-dsh plugin --profile headless add dsh-llm-codebuddy@latest
 ```
-
-只使用 WebUI 时，仅执行第一条即可。
 
 ## WebUI 配置
 
-### CodeBuddy 账号令牌登录（新用户推荐）
+打开 **设置 → 模型**，添加或编辑 `CodeBuddy 中国区`。认证区域有两个模式按钮：
 
-1. 打开“设置 → 模型”。
-2. 添加或编辑 `CodeBuddy 中国区`。
-3. 点击 API Key 输入框右侧的“令牌登录”。
-4. 在自动打开的浏览器中完成 CodeBuddy 中国站登录。
-5. WebUI 显示“令牌已登录”后即可获取模型并保存自定义目录。
+- `API Key`：只显示 API Key 来源和新增 Key 功能；
+- `令牌登录`：只显示令牌账号、登录、切换以及账号用量信息。
 
-如果 WebUI 无法打开浏览器，也可以使用命令行入口：
+切换模式后，另一种模式的账号或 Key 控件会隐藏，不会同时占用页面空间。
 
-```powershell
-npx --yes dsh-llm-codebuddy@latest login
+### 方式一：WorkBuddy API Key
+
+#### 使用环境变量中的 Key
+
+插件会自动检测：
+
+```text
+CODEBUDDY_API_KEY
 ```
 
-插件会调用 CodeBuddy 官方认证流程。完成登录后，插件会自动把
-`CodeBuddy 中国区` Provider 切换为令牌模式，无需 API Key。点击同一行的
-“API Key”可以切回 API Key 模式；已经保存的 API Key 不会被删除。
-两种凭据彼此独立保留，之后再次点击“令牌登录”会优先复用已保存令牌；仅在没有
-令牌或主动重新登录时才需要再次打开浏览器。
+如果这个环境变量存在，API Key 来源下拉列表会显示“环境变量 CODEBUDDY_API_KEY”。
+选择它即可使用；密钥值不会显示在页面中，也不会写入 `settings.yaml`。
 
-插件直接调用 CodeBuddy 中国站官方网页登录和令牌刷新接口，不依赖本机
-`codebuddy` 命令。访问令牌和刷新令牌保存在 DSH 凭据服务中，不会写入
-`settings.yaml` 或模型目录。
+#### 在 DSH 中保存新的 Key
 
-### WorkBuddy API Key
+1. 选择 `API Key` 模式；
+2. 在“新增 API Key”输入框粘贴 WorkBuddy Key；
+3. 可填写一个名称，例如“工作账号”或“测试账号”；
+4. 点击“添加并使用”；
+5. 新 Key 会出现在“当前 API Key”下拉列表中，并立即切换为当前 Key。
 
-1. 打开“设置 → 模型”。
-2. 点击“添加提供方”。
-3. 选择 `CodeBuddy 中国区`。
-4. 输入从 WorkBuddy 获取的 API Key 并保存。
-5. 点击该 Provider 的“编辑”，展开“自定义设置”。
-6. 点击“获取可用模型”，选择需要的模型并导入。
-7. 按需修改模型参数，然后保存。
+DSH 保存的 Key 存放在 DSH 凭据服务中。可以保存多个 Key 并随时切换；环境变量 Key
+和 DSH 保存的 Key 互不覆盖。删除操作只允许删除 DSH 保存的 Key，不会删除环境变量。
 
-再次编辑已配置的 Provider 时，会直接显示上次保存的模型目录。
+### 方式二：CodeBuddy 账号令牌
 
-## API Key 替换
+1. 选择 `令牌登录` 模式；
+2. 点击“登录 CodeBuddy”，插件会打开 CodeBuddy 中国站；
+3. 在浏览器完成账号登录；
+4. 返回 DSH 后，账号会保存到本地凭据并自动启用。
 
-- 输入新的 API Key 并保存：替换原 Key；
-- API Key 输入框留空并保存：保留原 Key；
-- 更换 Key 后建议重新点击“获取可用模型”，同步新账号的模型权限。
+再次打开页面时，可以在“令牌账号”下拉列表中切换账号。点击“添加账号”可以登录
+另一个账号，点击“删除账号”会移除当前账号的本地令牌。令牌登录不需要安装
+`codebuddy` 命令行工具。
 
-API Key 由 DSH 凭据服务保存，不会写入模型目录或插件源码。
+令牌模式下，插件会尝试显示：
 
-## 模型配置
+- 剩余积分或企业账号的“不限量”；
+- 今日请求次数；
+- 今日请求消耗的积分。
 
-- 没有自定义目录：使用 CodeBuddy 在线目录，失败时使用内置目录；
-- 保存自定义目录：仅向 DSH 提供目录中保留的模型；
-- 已知模型字段留空：继承在线目录或内置目录中的值；
-- 新模型缺少容量：上下文窗口默认 `262144`，最大输出默认 `32768`；
-- 点击“恢复默认模型”：删除自定义目录并恢复适配器目录。
+积分接口属于 CodeBuddy 中国站的账号服务，仅令牌模式使用；API Key 模式不会调用该
+接口。如果服务暂时不可用，页面会保留账号登录状态并显示“暂不可用”。
 
-配置值超过服务端真实限制时，CodeBuddy 仍可能拒绝请求。
+## 获取和编辑模型
+
+1. 在 `CodeBuddy 中国区` 的自定义设置中点击“获取可用模型”；
+2. 插件会使用当前选中的 API Key 或令牌请求 CodeBuddy 模型目录；
+3. 选择要使用的模型并保存；
+4. 再次编辑时，可以直接修改模型 ID、显示名称、上下文窗口和最大输出 Token。
+
+模型目录按当前账号权限返回。更换 API Key 或令牌账号后，建议重新点击“获取可用模型”。
+如果在线目录暂时失败，插件会使用内置目录作为兜底。
 
 ## 思考程度
 
-DSH 显示的思考程度来自当前模型自身的能力声明，插件把选中的档位转换为
-`reasoning_effort` 并发送给 CodeBuddy。模型推理由 CodeBuddy 云端执行。
+思考档位按模型分别决定，插件不会给所有模型强行使用同一套选项。在线模型目录会声明
+每个模型是否支持思考、支持哪些档位以及默认档位，WebUI 会据此显示可用选项。
+
+常见档位包括：
 
 ```text
 off / minimal / low / medium / high / xhigh / max
 ```
 
-实际显示哪些档位由 `/v3/config` 中该模型的 `supportsReasoning`、`onlyReasoning`、
-`thinkingLevelMap` 和 `reasoning.effort` 决定，不能跨模型共用一套固定档位。未手动
-选择时，使用 CodeBuddy 为该模型返回的默认档位；服务端没有声明时则不强行指定。
+实际选项可能因模型不同而不同。未手动指定时，使用 CodeBuddy 返回的默认档位；服务端
+没有声明思考能力时，插件不会额外发送思考参数。
+
+## 认证和请求说明
+
+- API Key 请求使用 WorkBuddy/CodeBuddy 的 OpenAI-compatible 接口；
+- 令牌请求使用 CodeBuddy 中国站的登录令牌，并在过期前自动刷新；
+- DSH 负责 Agent 循环、上下文、工具调用和权限；
+- CodeBuddy 负责模型推理并返回结果；
+- 访问令牌、刷新令牌和 DSH 保存的 API Key 不会写入模型目录或 `settings.yaml`。
 
 ## 更新
 
-重新运行安装命令即可更新到最新版：
+重新执行安装命令即可更新：
 
 ```powershell
 npx --yes dsh-llm-codebuddy@latest install
 ```
 
-更新完成后重启 DSH。模型配置和 API Key 不会被覆盖。
+更新后重启 DSH。已有的模型配置、API Key 和登录令牌会保留。
 
 ## 卸载
 
@@ -139,81 +143,47 @@ npx --yes dsh-llm-codebuddy@latest install
 npx --yes dsh-llm-codebuddy@latest uninstall
 ```
 
-卸载命令会：
-
-1. 备份 `~/.dsh/settings.yaml`；
-2. 只删除 `llm-pi-ai.providers.codebuddy-cn` 配置；
-3. 保留其他 Provider 和 DSH 设置；
-4. 从 `web`、`headless` Profile 移除插件；
-5. 保留 API Key 和登录令牌凭据，方便以后重新安装。
-
-完成后重启 DSH。备份文件名类似：
-
-```text
-settings.yaml.codebuddy-backup-2026-08-14T12-00-00-000Z
-```
-
-源码仓库、本地安装包和 API Key 不会被删除。
+卸载会移除 `CodeBuddy 中国区` 的 Provider 和插件包，并备份 DSH 设置文件。为方便以后
+重新安装，API Key 和登录令牌默认保留在 DSH 凭据服务中。
 
 ## 常见问题
 
-### 安装后看不到 CodeBuddy
+### 看不到 CodeBuddy Provider
 
-确认已经重启 DSH，并检查 Web Profile：
+重启 DSH 后重新打开 **设置 → 模型**。也可以检查：
 
 ```powershell
 dsh plugin --profile web list --depth 0
 ```
 
+### API Key 下拉列表只有环境变量
+
+不要使用 DSH 原生的旧密钥输入框提交。选择 `API Key` 模式，在插件自己的“新增 API Key”
+区域粘贴 Key 并点击“添加并使用”。成功后新 Key 会出现在“当前 API Key”下拉列表。
+
 ### 获取模型失败
 
-确认 API Key 来自 WorkBuddy 且仍然有效，然后重新输入 Key 并点击“获取可用模型”。
-接口临时不可用时，插件仍会提供内置模型目录。
+确认当前选中的 Key 来自 WorkBuddy 且仍然有效，或确认令牌账号登录状态正常。更换认证
+凭据后重新获取模型目录。
 
-### 为什么别人能看到某个模型，我这里看不到
+### 令牌登录后没有积分
 
-模型权限与 API Key 绑定。插件只导入 `/v3/config` 中 `agents[name=cli].models` 为
-当前 Key 返回的模型；更换 Key 后请重新点击“获取可用模型”。插件不会强行显示
-当前 Key 未授权的模型。
+积分查询只支持令牌模式，并依赖 CodeBuddy 中国站 billing 接口。网络、账号类型或接口
+暂时不可用时，页面会显示“暂不可用”，不影响模型调用。
 
 ### 调用时报 `500 status code (no body)`
 
-先更新到最新版并重启 DSH：
+先更新插件并重启 DSH：
 
 ```powershell
 npx --yes dsh-llm-codebuddy@latest install
 ```
 
-旧版本可能被 DSH 覆盖 CodeBuddy 请求标识，导致服务端拒绝请求；最新版已在插件请求层
-恢复 CodeBuddy 官方标识，同时适用于 API Key 和令牌模式。
+最新版会恢复 CodeBuddy 官方请求标识，兼容 API Key 和令牌模式。
 
-### 卸载后仍显示旧页面
+### 修改后页面仍显示旧布局
 
-关闭正在运行的 DSH，再重新启动。已经运行的进程不会自动卸载内存中的插件。
-
-## 开发文档
-
-需要开发其他 Agent 或 Provider 时，请阅读
-[反向代理调用 WorkBuddy API 开发文档](./docs/反向代理调用WorkBuddy-API开发文档.md)。
-
-## 工作原理
-
-```text
-WorkBuddy 提供 API Key
-          ↓
-DSH Agent → 本插件 → CodeBuddy /v2/chat/completions
-                    ↘ CodeBuddy /v3/config（获取模型）
-
-CodeBuddy 中国站网页登录 → 本插件保存并刷新 DSH 登录凭据
-                              ↓ 当前 access token
-DSH Agent → 本插件 → CodeBuddy API（Authorization: Bearer）
-```
-
-- DSH：负责 Agent 循环、上下文、工具调用和权限；
-- WorkBuddy：提供 API Key；
-- 插件：负责 Provider 注册、模型目录转换和请求兼容；
-- CodeBuddy：负责模型推理并返回结果。
-<img width="1885" height="853" alt="image" src="https://github.com/user-attachments/assets/eda31b48-8412-414d-b552-1b7ce0a7c3a0" />
+浏览器执行 `Ctrl+F5` 强制刷新；如果 DSH 进程已经运行较久，再关闭并重新启动 DSH。
 
 ## License
 
