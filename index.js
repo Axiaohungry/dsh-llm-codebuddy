@@ -187,12 +187,41 @@ async function fetchCodeBuddyModels(credential, signal) {
   return models;
 }
 
-function codeBuddyProvider(models, auth) {
+/**
+ * CodeBuddy's credential is already resolved by the DSH adapter.  Do not
+ * reuse pi-ai's DeepSeek envApiKeyAuth here: newer pi-ai releases require a
+ * signal argument while older DSH adapters call auth resolvers without one.
+ * This small adapter accepts both contracts and keeps bearer/API-key values
+ * opaque to the provider implementation.
+ */
+function codeBuddyApiKeyAuth() {
+  return {
+    name: `${DISPLAY_NAME} API Key`,
+    login: async (interaction) => {
+      const signal = interaction?.signal;
+      signal?.throwIfAborted?.();
+      const key = await interaction.prompt({ type: "secret", message: `Enter ${DISPLAY_NAME} API Key` });
+      signal?.throwIfAborted?.();
+      return { type: "api_key", key };
+    },
+    resolve: async ({ credential, signal } = {}) => {
+      signal?.throwIfAborted?.();
+      if (!credential?.key) return undefined;
+      return {
+        auth: { apiKey: credential.key },
+        ...(credential.env ? { env: credential.env } : {}),
+        source: "DSH credential",
+      };
+    },
+  };
+}
+
+function codeBuddyProvider(models) {
   return createProvider({
     id: PROVIDER,
     name: DISPLAY_NAME,
     baseUrl: BASE_URL,
-    auth,
+    auth: { apiKey: codeBuddyApiKeyAuth() },
     models,
     api: codeBuddyApi,
   });
@@ -271,7 +300,7 @@ function installSettingsCompat(ctx, ns, schema, entry, hooks) {
   });
 }
 
-export const __testing = Object.freeze({ authenticationHeaders, codeBuddyRequestOptions, codeBuddySource, modelsFromConfig, ownsProvider, runtimeHeaders, selectCodeBuddyModels });
+export const __testing = Object.freeze({ authenticationHeaders, codeBuddyApiKeyAuth, codeBuddyRequestOptions, codeBuddySource, modelsFromConfig, ownsProvider, runtimeHeaders, selectCodeBuddyModels });
 
 export function apply(ctx, config) {
   installCodeBuddyWeb(ctx);
@@ -284,8 +313,6 @@ export function apply(ctx, config) {
   let loginSessionPromise;
   let remoteModelsKey;
   const builtins = new Map(builtinProviders().map((provider) => [provider.id, provider]));
-  const apiKeyAuth = builtins.get("deepseek")?.auth;
-  if (!apiKeyAuth) throw new Error(`${name}: pi-ai DeepSeek auth helper is unavailable`);
 
   const effectiveConfig = () => {
     const raw = current() ?? {};
@@ -313,7 +340,7 @@ export function apply(ctx, config) {
         result.set(provider, resolvedProfile(provider, {
           ...sourceWithAuth,
           displayName: DISPLAY_NAME,
-        }, codeBuddyProvider(models, apiKeyAuth), configured));
+        }, codeBuddyProvider(models), configured));
         continue;
       }
       const base = builtins.get(provider);

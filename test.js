@@ -34,6 +34,24 @@ test("API Key 和登录令牌使用各自的认证头", () => {
   assert.deepEqual(__testing.authenticationHeaders({ value: "login-token", kind: "bearer" }), { authorization: "Bearer login-token" });
 });
 
+test("CodeBuddy 自有认证助手兼容新旧 DSH 的 signal 调用约定", async () => {
+  const auth = __testing.codeBuddyApiKeyAuth();
+  const credential = { type: "api_key", key: "login-token" };
+
+  // Older DSH calls resolve without a signal. This must not dereference it.
+  assert.deepEqual(await auth.resolve({ credential }), {
+    auth: { apiKey: "login-token" },
+    source: "DSH credential",
+  });
+
+  // Newer DSH supplies an AbortSignal. The same resolver must remain valid.
+  const controller = new AbortController();
+  assert.deepEqual(await auth.resolve({ credential, signal: controller.signal }), {
+    auth: { apiKey: "login-token" },
+    source: "DSH credential",
+  });
+});
+
 test("登录请求头不修改 DSH 冻结的配置对象", () => {
   const headers = __testing.runtimeHeaders(Object.freeze({ existing: "value" }));
   headers["X-User-Id"] = "user";
