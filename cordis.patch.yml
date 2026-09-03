@@ -3,4 +3,4 @@
 
 - insert:
     - id: llm-workbuddy
-      name: dsh-llm-workbuddy
+      name: '@axiaohungry/dsh-llm-workbuddy'
