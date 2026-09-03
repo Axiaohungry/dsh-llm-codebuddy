@@ -217,7 +217,7 @@ export function workBuddySessionId(session) {
   if (account.enterpriseId) return `enterprise:${account.enterpriseId}`;
   const refreshToken = session?.auth?.refreshToken ?? session?.auth?.accessToken;
   if (!refreshToken) throw new Error("WorkBuddy 登录会话缺少账号标识和令牌");
-  return `token:${createHash("sha256").update(refreshToken).digest("hex").slice(0, 24)}`;
+  return `token:${createHash("sha256").update(refreshToken).digest("hex")}`;
 }
 
 export function workBuddySessionLabel(session) {
