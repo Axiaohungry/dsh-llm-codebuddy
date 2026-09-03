@@ -20,8 +20,8 @@ import {
   upsertWorkBuddySession,
 } from "./workbuddy-auth.js";
 
-const PACKAGE = "dsh-llm-workbuddy";
-const LEGACY_PACKAGES = ["dsh-llm-codebuddy"];
+const PACKAGE = "@axiaohungry/dsh-llm-workbuddy";
+const LEGACY_PACKAGES = ["dsh-llm-workbuddy", "dsh-llm-codebuddy"];
 const PACKAGE_VERSION = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 const PACKAGE_SPEC = `${PACKAGE}@${PACKAGE_VERSION}`;
 const PROVIDER_PATH = ["llm-pi-ai", "providers", "workbuddy-cn"];

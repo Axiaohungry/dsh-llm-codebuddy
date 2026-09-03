@@ -38,20 +38,21 @@ DSH WebUI 中管理模型和认证方式。
 在 PowerShell 或终端执行：
 
 ```powershell
-npx --yes dsh-llm-workbuddy@latest install
+npx --yes @axiaohungry/dsh-llm-workbuddy@latest install
 ```
 
 安装器会为 DSH 的 `web` 和 `headless` Profile 安装插件。安装完成后重启 DSH。
 只使用 WebUI 时，也可以单独安装 Web Profile：
 
 ```powershell
-dsh plugin --profile web add dsh-llm-workbuddy@latest
+dsh plugin --profile web add @axiaohungry/dsh-llm-workbuddy@latest
 ```
 
 ### 从旧版升级
 
-插件 npm 包已从 `dsh-llm-codebuddy` 更名为 `dsh-llm-workbuddy`。重新执行上面的安装命令
-时，安装器会在 `web` 和 `headless` Profile 中自动移除旧包，再安装新包；已有 Provider、模型、
+插件 npm 包现在是 `@axiaohungry/dsh-llm-workbuddy`。重新执行上面的安装命令时，安装器会在
+`web` 和 `headless` Profile 中自动移除旧包（包括 `dsh-llm-workbuddy` 和
+`dsh-llm-codebuddy`），再安装新包；已有 Provider、模型、
 API Key 和令牌凭据会保留。
 
 新版本内部 Provider ID 为 `workbuddy-cn`。旧配置中的 `codebuddy-cn` 会在运行时兼容，并在
@@ -150,7 +151,7 @@ off / minimal / low / medium / high / xhigh / max
 重新执行安装命令即可更新：
 
 ```powershell
-npx --yes dsh-llm-workbuddy@latest install
+npx --yes @axiaohungry/dsh-llm-workbuddy@latest install
 ```
 
 更新后重启 DSH。已有的模型配置、API Key 和登录令牌会保留。
@@ -158,7 +159,7 @@ npx --yes dsh-llm-workbuddy@latest install
 ## 卸载
 
 ```powershell
-npx --yes dsh-llm-workbuddy@latest uninstall
+npx --yes @axiaohungry/dsh-llm-workbuddy@latest uninstall
 ```
 
 卸载会移除 `WorkBuddy 中国区` 的 Provider 和插件包，并备份 DSH 设置文件。为方便以后
@@ -194,7 +195,7 @@ dsh plugin --profile web list --depth 0
 先更新插件并重启 DSH：
 
 ```powershell
-npx --yes dsh-llm-workbuddy@latest install
+npx --yes @axiaohungry/dsh-llm-workbuddy@latest install
 ```
 
 最新版会恢复 WorkBuddy 官方请求标识，兼容 API Key 和令牌模式。
