@@ -7,21 +7,25 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseDocument } from "yaml";
 import {
-  CODEBUDDY_SESSION_REF,
-  CODEBUDDY_SESSIONS_REF,
-  createCodeBuddySessionStore,
-  loginCodeBuddy,
-  parseCodeBuddySession,
-  parseCodeBuddySessions,
-  serializeCodeBuddySession,
-  serializeCodeBuddySessions,
-  upsertCodeBuddySession,
-} from "./codebuddy-auth.js";
+  WORKBUDDY_SESSION_REF,
+  WORKBUDDY_SESSIONS_REF,
+  LEGACY_SESSION_REF,
+  LEGACY_SESSIONS_REF,
+  createWorkBuddySessionStore,
+  loginWorkBuddy,
+  parseWorkBuddySession,
+  parseWorkBuddySessions,
+  serializeWorkBuddySession,
+  serializeWorkBuddySessions,
+  upsertWorkBuddySession,
+} from "./workbuddy-auth.js";
 
-const PACKAGE = "dsh-llm-codebuddy";
+const PACKAGE = "dsh-llm-workbuddy";
+const LEGACY_PACKAGES = ["dsh-llm-codebuddy"];
 const PACKAGE_VERSION = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 const PACKAGE_SPEC = `${PACKAGE}@${PACKAGE_VERSION}`;
-const PROVIDER_PATH = ["llm-pi-ai", "providers", "codebuddy-cn"];
+const PROVIDER_PATH = ["llm-pi-ai", "providers", "workbuddy-cn"];
+const LEGACY_PROVIDER_PATH = ["llm-pi-ai", "providers", "codebuddy-cn"];
 const IGNORED_BUILDS = ["@google/genai", "protobufjs"];
 const require = createRequire(import.meta.url);
 
@@ -29,11 +33,15 @@ function dshHome() {
   return resolve(process.env.DSH_HOME || join(homedir(), ".dsh"));
 }
 
-function profileHasPlugin(home, profile) {
+function profileHasPackage(home, profile, packageName) {
   const file = join(home, "profiles", profile, "package.json");
   if (!existsSync(file)) return false;
   const json = JSON.parse(readFileSync(file, "utf8"));
-  return Boolean(json.dependencies?.[PACKAGE] || json.devDependencies?.[PACKAGE]);
+  return Boolean(json.dependencies?.[packageName] || json.devDependencies?.[packageName]);
+}
+
+function profileHasPlugin(home, profile) {
+  return profileHasPackage(home, profile, PACKAGE);
 }
 
 function dshEnv() {
@@ -58,7 +66,7 @@ function runDsh(args) {
 }
 
 function writeYamlDocument(file, document) {
-  const temporary = join(dirname(file), `.codebuddy-${process.pid}.tmp`);
+  const temporary = join(dirname(file), `.workbuddy-${process.pid}.tmp`);
   writeFileSync(temporary, String(document), "utf8");
   renameSync(temporary, file);
 }
@@ -97,7 +105,8 @@ function cleanPnpmWorkspace(file) {
   if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
   const entries = document.getIn(["minimumReleaseAgeExclude"])?.items;
   if (!entries) return;
-  const remaining = entries.map((entry) => entry.value).filter((entry) => !String(entry).startsWith(`${PACKAGE}@`));
+  const packageNames = [PACKAGE, ...LEGACY_PACKAGES];
+  const remaining = entries.map((entry) => entry.value).filter((entry) => !packageNames.some((packageName) => String(entry).startsWith(`${packageName}@`)));
   if (remaining.length === entries.length) return;
   if (remaining.length) document.setIn(["minimumReleaseAgeExclude"], remaining);
   else document.deleteIn(["minimumReleaseAgeExclude"]);
@@ -109,12 +118,13 @@ function cleanSettings(file) {
   const source = readFileSync(file, "utf8");
   const document = parseDocument(source);
   if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
-  if (!document.hasIn(PROVIDER_PATH)) return undefined;
+  const paths = [PROVIDER_PATH, LEGACY_PROVIDER_PATH].filter((path) => document.hasIn(path));
+  if (paths.length === 0) return undefined;
 
-  document.deleteIn(PROVIDER_PATH);
+  for (const path of paths) document.deleteIn(path);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backup = `${file}.codebuddy-backup-${stamp}`;
-  const temporary = join(dirname(file), `.settings-codebuddy-${process.pid}.tmp`);
+  const backup = `${file}.workbuddy-backup-${stamp}`;
+  const temporary = join(dirname(file), `.settings-workbuddy-${process.pid}.tmp`);
   copyFileSync(file, backup);
   writeFileSync(temporary, String(document), "utf8");
   renameSync(temporary, file);
@@ -127,10 +137,17 @@ function enableTokenLogin(home = dshHome()) {
   const document = parseDocument(source);
   if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
   if (document.hasIn(PROVIDER_PATH)) document.deleteIn([...PROVIDER_PATH, "apiKeyEnv"]);
+  else if (document.hasIn(LEGACY_PROVIDER_PATH)) {
+    const legacy = document.getIn(LEGACY_PROVIDER_PATH);
+    const value = legacy && typeof legacy.toJSON === "function" ? legacy.toJSON() : legacy;
+    document.setIn(PROVIDER_PATH, document.createNode(value && typeof value === "object" ? value : {}));
+    document.deleteIn([...PROVIDER_PATH, "apiKeyEnv"]);
+    document.deleteIn(LEGACY_PROVIDER_PATH);
+  }
   else document.setIn(PROVIDER_PATH, {});
   if (existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    copyFileSync(file, `${file}.codebuddy-backup-${stamp}`);
+    copyFileSync(file, `${file}.workbuddy-backup-${stamp}`);
   }
   writeYamlDocument(file, document);
 }
@@ -139,59 +156,76 @@ function storeLoginSession(session, home = dshHome()) {
   const file = join(home, ".credentials.yaml");
   const document = parseDocument(existsSync(file) ? readFileSync(file, "utf8") : "{}\n");
   if (document.errors.length) throw new Error(`无法解析 ${file}：${document.errors[0].message}`);
-  const stored = document.get(CODEBUDDY_SESSIONS_REF) ?? document.get(CODEBUDDY_SESSION_REF);
-  const current = stored ? parseCodeBuddySessions(stored) : createCodeBuddySessionStore();
-  const next = upsertCodeBuddySession(current, session);
-  document.set(CODEBUDDY_SESSIONS_REF, serializeCodeBuddySessions(next));
-  document.set(CODEBUDDY_SESSION_REF, serializeCodeBuddySession(next.sessions.find((entry) => entry.id === next.activeId)));
+  const stored = document.get(WORKBUDDY_SESSIONS_REF)
+    ?? document.get(LEGACY_SESSIONS_REF)
+    ?? document.get(WORKBUDDY_SESSION_REF)
+    ?? document.get(LEGACY_SESSION_REF);
+  const current = stored ? parseWorkBuddySessions(stored) : createWorkBuddySessionStore();
+  const next = upsertWorkBuddySession(current, session);
+  document.set(WORKBUDDY_SESSIONS_REF, serializeWorkBuddySessions(next));
+  document.set(WORKBUDDY_SESSION_REF, serializeWorkBuddySession(next.sessions.find((entry) => entry.id === next.activeId)));
+  document.delete(LEGACY_SESSIONS_REF);
+  document.delete(LEGACY_SESSION_REF);
   if (existsSync(file)) {
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    copyFileSync(file, `${file}.codebuddy-backup-${stamp}`);
+    copyFileSync(file, `${file}.workbuddy-backup-${stamp}`);
   }
   writeYamlDocument(file, document);
 }
 
 async function login() {
-  console.log("正在打开 CodeBuddy 中国站网页登录（无需安装 CodeBuddy CLI）……");
-  const session = await loginCodeBuddy((url, opened) => {
+  console.log("正在打开 WorkBuddy 中国站网页登录（无需安装 WorkBuddy CLI）……");
+  const session = await loginWorkBuddy((url, opened) => {
     if (opened) console.log("浏览器登录页已打开，请在浏览器中完成登录。");
     else console.log(`无法自动打开浏览器，请手动访问：${url}`);
   });
   storeLoginSession(session);
   enableTokenLogin();
-  console.log("CodeBuddy 令牌登录成功，Provider 已切换为令牌模式。请重启 DSH。");
+  console.log("WorkBuddy 令牌登录成功，Provider 已切换为令牌模式。请重启 DSH。");
 }
 
 function install() {
   for (const profile of ["web", "headless"]) {
     runDsh(["plugin", "--profile", profile, "list", "--depth", "0"]);
     const workspace = join(dshHome(), "profiles", profile, "pnpm-workspace.yaml");
-    withPnpmBuildPolicy(workspace, () => runDsh(["plugin", "--profile", profile, "add", PACKAGE_SPEC]));
+    withPnpmBuildPolicy(workspace, () => {
+      for (const legacyPackage of LEGACY_PACKAGES) {
+        if (profileHasPackage(dshHome(), profile, legacyPackage)) {
+          runDsh(["plugin", "--profile", profile, "remove", legacyPackage]);
+        }
+      }
+      runDsh(["plugin", "--profile", profile, "add", PACKAGE_SPEC]);
+    });
   }
-  console.log("CodeBuddy Provider 已安装。请重启 DSH 后进行配置。");
+  console.log("WorkBuddy Provider 已安装。请重启 DSH 后进行配置。");
 }
 
 function uninstall(home = dshHome()) {
   const backup = cleanSettings(join(home, "settings.yaml"));
   for (const profile of ["web", "headless"]) {
     const workspace = join(home, "profiles", profile, "pnpm-workspace.yaml");
-    if (profileHasPlugin(home, profile)) {
-      withPnpmBuildPolicy(workspace, () => runDsh(["plugin", "--profile", profile, "remove", PACKAGE]));
+    const installedPackages = [PACKAGE, ...LEGACY_PACKAGES].filter((packageName) => profileHasPackage(home, profile, packageName));
+    if (installedPackages.length) {
+      withPnpmBuildPolicy(workspace, () => {
+        for (const packageName of installedPackages) {
+          runDsh(["plugin", "--profile", profile, "remove", packageName]);
+        }
+      });
     }
     cleanPnpmWorkspace(workspace);
   }
-  console.log(backup ? `CodeBuddy 配置已清理，备份：${backup}` : "未发现 CodeBuddy Provider 配置。");
+  console.log(backup ? `WorkBuddy 配置已清理，备份：${backup}` : "未发现 WorkBuddy Provider 配置。");
   console.log("插件已卸载，API Key 和登录令牌凭据保持不变。请重启 DSH。");
 }
 
 function selfTest() {
-  const root = mkdtempSync(join(tmpdir(), "dsh-codebuddy-cli-"));
+  const root = mkdtempSync(join(tmpdir(), "dsh-workbuddy-cli-"));
   try {
     const file = join(root, "settings.yaml");
-    writeFileSync(file, "llm-pi-ai:\n  providers:\n    opencode-go:\n      apiKeyEnv: OPENCODE_GO_API_KEY\n    codebuddy-cn:\n      apiKeyEnv: CODEBUDDY_CN_API_KEY\n", "utf8");
+    writeFileSync(file, "llm-pi-ai:\n  providers:\n    opencode-go:\n      apiKeyEnv: OPENCODE_GO_API_KEY\n    codebuddy-cn:\n      apiKeyEnv: WORKBUDDY_CN_API_KEY\n      models:\n        - id: legacy-model\n", "utf8");
     enableTokenLogin(root);
     const tokenMode = parseDocument(readFileSync(file, "utf8"));
-    if (tokenMode.hasIn([...PROVIDER_PATH, "apiKeyEnv"]) || !tokenMode.hasIn(PROVIDER_PATH)) {
+    if (tokenMode.hasIn([...PROVIDER_PATH, "apiKeyEnv"]) || !tokenMode.hasIn(PROVIDER_PATH) || tokenMode.hasIn(LEGACY_PROVIDER_PATH) || !tokenMode.hasIn([...PROVIDER_PATH, "models", 0, "id"])) {
       throw new Error("token login settings self-test failed");
     }
     const backup = cleanSettings(file);
@@ -208,12 +242,12 @@ function selfTest() {
       account: { userId: "test-user" },
     };
     storeLoginSession(sampleSession, root);
-    const storedSession = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(CODEBUDDY_SESSION_REF);
-    if (parseCodeBuddySession(storedSession).account.userId !== "test-user") {
+    const storedSession = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(WORKBUDDY_SESSION_REF);
+    if (parseWorkBuddySession(storedSession).account.userId !== "test-user") {
       throw new Error("token credential storage self-test failed");
     }
-    const storedSessions = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(CODEBUDDY_SESSIONS_REF);
-    const sessionStore = parseCodeBuddySessions(storedSessions);
+    const storedSessions = parseDocument(readFileSync(join(root, ".credentials.yaml"), "utf8")).get(WORKBUDDY_SESSIONS_REF);
+    const sessionStore = parseWorkBuddySessions(storedSessions);
     if (sessionStore.sessions.length !== 1 || sessionStore.activeId !== sessionStore.sessions[0].id) {
       throw new Error("token account list self-test failed");
     }
@@ -250,6 +284,6 @@ else if (command === "uninstall") uninstall();
 else if (command === "login") await login();
 else if (command === "--self-test") selfTest();
 else {
-  console.log("用法：dsh-llm-codebuddy <install|login|uninstall>");
+  console.log("用法：dsh-llm-workbuddy <install|login|uninstall>");
   process.exitCode = 1;
 }

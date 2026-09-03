@@ -2,5 +2,5 @@
   disabled: true
 
 - insert:
-    - id: llm-codebuddy
-      name: dsh-llm-codebuddy
+    - id: llm-workbuddy
+      name: dsh-llm-workbuddy

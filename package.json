@@ -1,12 +1,11 @@
 {
-  "name": "dsh-llm-codebuddy",
+  "name": "dsh-llm-workbuddy",
   "version": "1.3.10",
-  "description": "通过 WorkBuddy API Key 或 CodeBuddy 登录令牌为 DeepSeek Harness 接入 CodeBuddy 模型",
+  "description": "通过 WorkBuddy API Key 或 WorkBuddy 登录令牌为 DeepSeek Harness 接入 WorkBuddy 模型",
   "author": "Axiaohungry",
   "keywords": [
     "deepseek-harness",
     "dsh",
-    "codebuddy",
     "workbuddy",
     "llm",
     "provider"
@@ -19,21 +18,21 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-llm-codebuddy": "cli.js"
+    "dsh-llm-workbuddy": "cli.js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Axiaohungry/dsh-llm-codebuddy.git"
+    "url": "git+https://github.com/Axiaohungry/dsh-llm-workbuddy.git"
   },
-  "homepage": "https://github.com/Axiaohungry/dsh-llm-codebuddy#readme",
+  "homepage": "https://github.com/Axiaohungry/dsh-llm-workbuddy#readme",
   "bugs": {
-    "url": "https://github.com/Axiaohungry/dsh-llm-codebuddy/issues"
+    "url": "https://github.com/Axiaohungry/dsh-llm-workbuddy/issues"
   },
   "files": [
     "index.js",
-    "codebuddy-auth.js",
-    "codebuddy-credits.js",
-    "codebuddy-web.js",
+    "workbuddy-auth.js",
+    "workbuddy-credits.js",
+    "workbuddy-web.js",
     "client.js",
     "cli.js",
     "cordis.patch.yml",
@@ -42,7 +41,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check codebuddy-auth.js && node --check codebuddy-credits.js && node --check codebuddy-web.js && node --check client.js && node --check cli.js && node --test test.js && node cli.js --self-test"
+    "check": "node --check index.js && node --check workbuddy-auth.js && node --check workbuddy-credits.js && node --check workbuddy-web.js && node --check client.js && node --check cli.js && node --test test.js && node cli.js --self-test"
   },
   "dsh": {
     "engines": {

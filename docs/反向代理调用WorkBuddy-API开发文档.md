@@ -1,4 +1,4 @@
-# CodeBuddy 调用 WorkBuddy API 开发文档
+# WorkBuddy API 调用开发文档
 
 > 适用对象：需要在其他 Agent、CLI、IDE 插件或本地代理中接入 CodeBuddy 模型的开发者  
 > 验证日期：2026-08-14  
@@ -53,14 +53,14 @@ flowchart LR
 推荐环境变量：
 
 ```text
-CODEBUDDY_API_KEY=<从 WorkBuddy 获取的 Key>
+WORKBUDDY_API_KEY=<从 WorkBuddy 获取的 Key>
 ```
 
 Windows PowerShell 设置用户环境变量：
 
 ```powershell
 [Environment]::SetEnvironmentVariable(
-  "CODEBUDDY_API_KEY",
+  "WORKBUDDY_API_KEY",
   "<在本机填写，不要提交到仓库>",
   "User"
 )
@@ -68,6 +68,9 @@ Windows PowerShell 设置用户环境变量：
 
 新进程才能读取新设置。不要在日志中输出 Key；诊断两个 Key 是否相同时，可以比较
 SHA-256 指纹，而不是打印明文。
+
+本插件新版本使用 `WORKBUDDY_API_KEY`。为兼容旧版本，仍可读取 `CODEBUDDY_API_KEY`，但新
+项目建议统一改用前者。
 
 ## 5. 获取当前 Key 可用的模型
 
@@ -149,8 +152,8 @@ const agents = Array.isArray(data.agents)
 Node.js 22 以上可直接使用内置 `fetch`，不需要 SDK：
 
 ```javascript
-const apiKey = process.env.CODEBUDDY_API_KEY;
-if (!apiKey) throw new Error("缺少 CODEBUDDY_API_KEY");
+const apiKey = process.env.WORKBUDDY_API_KEY;
+if (!apiKey) throw new Error("缺少 WORKBUDDY_API_KEY");
 
 const response = await fetch("https://copilot.tencent.com/v3/config", {
   headers: {
@@ -407,8 +410,8 @@ data: [DONE]
 ## 12. 完整 Node.js 流式示例
 
 ```javascript
-const apiKey = process.env.CODEBUDDY_API_KEY;
-if (!apiKey) throw new Error("缺少 CODEBUDDY_API_KEY");
+const apiKey = process.env.WORKBUDDY_API_KEY;
+if (!apiKey) throw new Error("缺少 WORKBUDDY_API_KEY");
 
 const response = await fetch("https://copilot.tencent.com/v2/chat/completions", {
   method: "POST",

@@ -1,35 +1,40 @@
 import { randomBytes } from "node:crypto";
 import { credentialRef } from "@deepseek-ai/dsh-credentials";
 import {
-  CODEBUDDY_API_KEYS_REF,
-  CODEBUDDY_SESSION_REF,
-  CODEBUDDY_SESSIONS_REF,
-  activeCodeBuddySession,
-  codeBuddyApiKeyEntries,
-  codeBuddySessionAccounts,
-  createCodeBuddyApiKeyStore,
-  createCodeBuddySessionStore,
-  parseCodeBuddyApiKeys,
-  loginCodeBuddy,
-  parseCodeBuddySession,
-  parseCodeBuddySessions,
-  refreshCodeBuddySession,
-  serializeCodeBuddyApiKeys,
-  serializeCodeBuddySession,
-  serializeCodeBuddySessions,
+  WORKBUDDY_API_KEYS_REF,
+  WORKBUDDY_SESSION_REF,
+  WORKBUDDY_SESSIONS_REF,
+  LEGACY_API_KEYS_REF,
+  LEGACY_SESSION_REF,
+  LEGACY_SESSIONS_REF,
+  activeWorkBuddySession,
+  workBuddyApiKeyEntries,
+  workBuddySessionAccounts,
+  createWorkBuddyApiKeyStore,
+  createWorkBuddySessionStore,
+  parseWorkBuddyApiKeys,
+  loginWorkBuddy,
+  parseWorkBuddySession,
+  parseWorkBuddySessions,
+  refreshWorkBuddySession,
+  serializeWorkBuddyApiKeys,
+  serializeWorkBuddySession,
+  serializeWorkBuddySessions,
   sessionNeedsRefresh,
-  upsertCodeBuddyApiKey,
-  upsertCodeBuddySession,
-} from "./codebuddy-auth.js";
-import { fetchCodeBuddyCredits } from "./codebuddy-credits.js";
+  upsertWorkBuddyApiKey,
+  upsertWorkBuddySession,
+} from "./workbuddy-auth.js";
+import { fetchWorkBuddyCredits } from "./workbuddy-credits.js";
 
-const PROVIDER = "codebuddy-cn";
-const API_KEY_ENV = "CODEBUDDY_API_KEY";
-const ROUTE = "/dsh-llm-codebuddy/auth";
+const PROVIDER = "workbuddy-cn";
+const LEGACY_PROVIDER = "codebuddy-cn";
+const API_KEY_ENV = "WORKBUDDY_API_KEY";
+const LEGACY_API_KEY_ENV = "CODEBUDDY_API_KEY";
+const ROUTE = "/dsh-llm-workbuddy/auth";
 const ENV_SOURCES = new Set(["env", "user-env", "project-env"]);
 
 export function authenticationMode(config) {
-  const profile = config?.providers?.[PROVIDER];
+  const profile = config?.providers?.[PROVIDER] ?? config?.providers?.[LEGACY_PROVIDER];
   return profile && profile.apiKeyEnv === undefined ? "token" : "api-key";
 }
 
@@ -68,21 +73,31 @@ async function requestBody(req) {
 
 async function setMode(settings, mode, apiKeyRef = API_KEY_ENV) {
   const config = settings.get("llm-pi-ai");
-  const exists = Object.hasOwn(config?.providers ?? {}, PROVIDER);
+  const providers = config?.providers ?? {};
+  const exists = Object.hasOwn(providers, PROVIDER);
+  const legacy = !exists && Object.hasOwn(providers, LEGACY_PROVIDER) ? providers[LEGACY_PROVIDER] : undefined;
   const path = ["providers", PROVIDER];
   if (!exists) {
-    await settings.mutate("llm-pi-ai", [{ op: "set", path, value: mode === "token" ? {} : { apiKeyEnv: apiKeyRef } }]);
+    const value = { ...(legacy ?? {}), ...(mode === "token" ? {} : { apiKeyEnv: apiKeyRef }) };
+    await settings.mutate("llm-pi-ai", [
+      { op: "set", path, value },
+      ...(legacy ? [{ op: "unset", path: ["providers", LEGACY_PROVIDER] }] : []),
+    ]);
     return;
   }
-  await settings.mutate("llm-pi-ai", [{
-    op: mode === "token" ? "unset" : "set",
-    path: [...path, "apiKeyEnv"],
-    ...(mode === "api-key" ? { value: apiKeyRef } : {}),
-  }]);
+  await settings.mutate("llm-pi-ai", [
+    {
+      op: mode === "token" ? "unset" : "set",
+      path: [...path, "apiKeyEnv"],
+      ...(mode === "api-key" ? { value: apiKeyRef } : {}),
+    },
+    ...(Object.hasOwn(providers, LEGACY_PROVIDER) ? [{ op: "unset", path: ["providers", LEGACY_PROVIDER] }] : []),
+  ]);
 }
 
 function configuredApiKeyRef(settings) {
-  return settings.get("llm-pi-ai")?.providers?.[PROVIDER]?.apiKeyEnv ?? API_KEY_ENV;
+  const providers = settings.get("llm-pi-ai")?.providers ?? {};
+  return providers[PROVIDER]?.apiKeyEnv ?? providers[LEGACY_PROVIDER]?.apiKeyEnv ?? API_KEY_ENV;
 }
 
 function maskApiKey(value) {
@@ -95,22 +110,26 @@ function textLabel(value) {
 }
 
 function storedApiKeyRef() {
-  return `CODEBUDDY_API_KEY_DSH_${Date.now().toString(36).toUpperCase()}_${randomBytes(6).toString("hex").toUpperCase()}`;
+  return `WORKBUDDY_API_KEY_DSH_${Date.now().toString(36).toUpperCase()}_${randomBytes(6).toString("hex").toUpperCase()}`;
 }
 
 async function readApiKeyStore(credentials) {
-  const stored = await credentials.resolve(credentialRef(CODEBUDDY_API_KEYS_REF));
-  if (!stored?.value) return createCodeBuddyApiKeyStore();
-  return parseCodeBuddyApiKeys(stored.value);
+  for (const ref of [WORKBUDDY_API_KEYS_REF, LEGACY_API_KEYS_REF]) {
+    const stored = await credentials.resolve(credentialRef(ref));
+    if (stored?.value) return parseWorkBuddyApiKeys(stored.value);
+  }
+  return createWorkBuddyApiKeyStore();
 }
 
 async function writeApiKeyStore(credentials, store) {
-  const normalized = createCodeBuddyApiKeyStore(store?.entries ?? [], store?.activeId);
+  const normalized = createWorkBuddyApiKeyStore(store?.entries ?? [], store?.activeId);
   if (normalized.entries.length === 0) {
-    await credentials.unset(credentialRef(CODEBUDDY_API_KEYS_REF));
+    await credentials.unset(credentialRef(WORKBUDDY_API_KEYS_REF));
+    await credentials.unset(credentialRef(LEGACY_API_KEYS_REF));
     return;
   }
-  await credentials.set(credentialRef(CODEBUDDY_API_KEYS_REF), serializeCodeBuddyApiKeys(normalized));
+  await credentials.set(credentialRef(WORKBUDDY_API_KEYS_REF), serializeWorkBuddyApiKeys(normalized));
+  await credentials.unset(credentialRef(LEGACY_API_KEYS_REF));
 }
 
 async function currentApiKeyState(webCtx) {
@@ -119,20 +138,22 @@ async function currentApiKeyState(webCtx) {
   const ref = apiMode ? configuredApiKeyRef(webCtx.settings) : undefined;
   const items = [];
   const seenRefs = new Set();
-  const environment = await webCtx.credentials.resolve(credentialRef(API_KEY_ENV));
-  if (environment?.value) {
-    items.push({
-      id: `env:${API_KEY_ENV}`,
-      kind: "environment",
-      label: `环境变量 ${API_KEY_ENV}`,
-      ref: API_KEY_ENV,
-      configured: true,
-      masked: maskApiKey(environment.value),
-      source: environment.source,
-    });
-    seenRefs.add(API_KEY_ENV);
+  for (const envRef of [API_KEY_ENV, LEGACY_API_KEY_ENV]) {
+    const environment = await webCtx.credentials.resolve(credentialRef(envRef));
+    if (environment?.value) {
+      items.push({
+        id: `env:${envRef}`,
+        kind: "environment",
+        label: `环境变量 ${envRef}`,
+        ref: envRef,
+        configured: true,
+        masked: maskApiKey(environment.value),
+        source: environment.source,
+      });
+      seenRefs.add(envRef);
+    }
   }
-  for (const entry of codeBuddyApiKeyEntries(store)) {
+  for (const entry of workBuddyApiKeyEntries(store)) {
     if (seenRefs.has(entry.ref)) continue;
     const resolved = await webCtx.credentials.resolve(credentialRef(entry.ref));
     items.push({
@@ -157,7 +178,10 @@ async function currentApiKeyState(webCtx) {
       });
     }
   }
-  const configured = apiMode ? items.find((item) => item.ref === ref) : undefined;
+  const configured = apiMode
+    ? items.find((item) => item.ref === ref)
+      ?? (ref === API_KEY_ENV ? items.find((item) => item.ref === LEGACY_API_KEY_ENV) : undefined)
+    : undefined;
   const active = configured ?? items.find((item) => item.id === store.activeId) ?? items[0];
   return {
     apiKeys: items,
@@ -167,53 +191,60 @@ async function currentApiKeyState(webCtx) {
 }
 
 async function readSessionStore(credentials) {
-  const stored = await credentials.resolve(credentialRef(CODEBUDDY_SESSIONS_REF));
-  if (stored?.value) return parseCodeBuddySessions(stored.value);
-  const legacy = await credentials.resolve(credentialRef(CODEBUDDY_SESSION_REF));
-  if (!legacy?.value) return createCodeBuddySessionStore();
-  const session = parseCodeBuddySession(legacy.value);
-  return createCodeBuddySessionStore([session]);
+  for (const ref of [WORKBUDDY_SESSIONS_REF, LEGACY_SESSIONS_REF]) {
+    const stored = await credentials.resolve(credentialRef(ref));
+    if (stored?.value) return parseWorkBuddySessions(stored.value);
+  }
+  for (const ref of [WORKBUDDY_SESSION_REF, LEGACY_SESSION_REF]) {
+    const legacy = await credentials.resolve(credentialRef(ref));
+    if (legacy?.value) return createWorkBuddySessionStore([parseWorkBuddySession(legacy.value)]);
+  }
+  return createWorkBuddySessionStore();
 }
 
 async function writeSessionStore(credentials, store) {
-  const active = activeCodeBuddySession(store);
+  const active = activeWorkBuddySession(store);
   if (!active) {
-    await credentials.unset(credentialRef(CODEBUDDY_SESSIONS_REF));
-    await credentials.unset(credentialRef(CODEBUDDY_SESSION_REF));
+    await credentials.unset(credentialRef(WORKBUDDY_SESSIONS_REF));
+    await credentials.unset(credentialRef(WORKBUDDY_SESSION_REF));
+    await credentials.unset(credentialRef(LEGACY_SESSIONS_REF));
+    await credentials.unset(credentialRef(LEGACY_SESSION_REF));
     return;
   }
-  await credentials.set(credentialRef(CODEBUDDY_SESSIONS_REF), serializeCodeBuddySessions(store));
+  await credentials.set(credentialRef(WORKBUDDY_SESSIONS_REF), serializeWorkBuddySessions(store));
   // Keep the old single-session reference as a compatibility pointer for older plugin versions.
-  await credentials.set(credentialRef(CODEBUDDY_SESSION_REF), serializeCodeBuddySession(active));
+  await credentials.set(credentialRef(WORKBUDDY_SESSION_REF), serializeWorkBuddySession(active));
+  await credentials.unset(credentialRef(LEGACY_SESSIONS_REF));
+  await credentials.unset(credentialRef(LEGACY_SESSION_REF));
 }
 
 async function resolveSession(webCtx, accountId) {
   const store = await readSessionStore(webCtx.credentials);
   const requestedId = typeof accountId === "string" && accountId ? accountId : store.activeId;
-  let session = store.sessions.find((entry) => entry.id === requestedId) ?? activeCodeBuddySession(store);
-  if (!session) throw new Error("没有找到该 CodeBuddy 登录账号");
+  let session = store.sessions.find((entry) => entry.id === requestedId) ?? activeWorkBuddySession(store);
+  if (!session) throw new Error("没有找到该 WorkBuddy 登录账号");
   if (sessionNeedsRefresh(session)) {
-    session = { ...session, ...(await refreshCodeBuddySession(session)), updatedAt: Date.now() };
-    const nextStore = upsertCodeBuddySession({ ...store, activeId: session.id }, session);
+    session = { ...session, ...(await refreshWorkBuddySession(session)), updatedAt: Date.now() };
+    const nextStore = upsertWorkBuddySession({ ...store, activeId: session.id }, session);
     await writeSessionStore(webCtx.credentials, nextStore);
-    session = activeCodeBuddySession(nextStore);
+    session = activeWorkBuddySession(nextStore);
   }
   return session;
 }
 
-export function installCodeBuddyWeb(ctx) {
+export function installWorkBuddyWeb(ctx) {
   ctx.inject(["webServer", "settings", "credentials"], (webCtx) => {
     let loginPromise;
     const currentState = async () => {
       const store = await readSessionStore(webCtx.credentials);
-      const active = activeCodeBuddySession(store);
+      const active = activeWorkBuddySession(store);
       const apiKeys = await currentApiKeyState(webCtx);
       return {
         ok: true,
         mode: authenticationMode(webCtx.settings.get("llm-pi-ai")),
         authenticated: active !== undefined,
         activeAccountId: active?.id ?? null,
-        accounts: codeBuddySessionAccounts(store),
+        accounts: workBuddySessionAccounts(store),
         ...apiKeys,
       };
     };
@@ -221,7 +252,7 @@ export function installCodeBuddyWeb(ctx) {
       try {
         json(res, 200, await currentState());
       } catch (error) {
-        json(res, 500, { ok: false, message: error instanceof Error ? error.message : "读取 CodeBuddy 认证状态失败" });
+        json(res, 500, { ok: false, message: error instanceof Error ? error.message : "读取 WorkBuddy 认证状态失败" });
       }
     };
     const apiKey = async (req, res) => {
@@ -233,7 +264,7 @@ export function installCodeBuddyWeb(ctx) {
         if (typeof body.keyId === "string" && body.keyId) {
           const state = await currentApiKeyState(webCtx);
           const selected = state.apiKeys.find((entry) => entry.id === body.keyId);
-          if (!selected) return json(res, 404, { ok: false, message: "没有找到该 CodeBuddy API Key" });
+          if (!selected) return json(res, 404, { ok: false, message: "没有找到该 WorkBuddy API Key" });
           if (!selected.configured) return json(res, 409, { ok: false, message: "该 API Key 已不可用，请删除后重新添加" });
           ref = selected.ref;
           const store = await readApiKeyStore(webCtx.credentials);
@@ -263,7 +294,7 @@ export function installCodeBuddyWeb(ctx) {
         };
         await webCtx.credentials.set(credentialRef(ref), value);
         try {
-          const next = upsertCodeBuddyApiKey(store, entry);
+          const next = upsertWorkBuddyApiKey(store, entry);
           await writeApiKeyStore(webCtx.credentials, next);
           await setMode(webCtx.settings, "api-key", ref);
         } catch (error) {
@@ -282,7 +313,7 @@ export function installCodeBuddyWeb(ctx) {
         const body = await requestBody(req);
         const store = await readApiKeyStore(webCtx.credentials);
         const entry = store.entries.find((item) => item.id === body.keyId);
-        if (!entry) return json(res, 404, { ok: false, message: "没有找到该 CodeBuddy API Key" });
+        if (!entry) return json(res, 404, { ok: false, message: "没有找到该 WorkBuddy API Key" });
         const activeRef = configuredApiKeyRef(webCtx.settings);
         await webCtx.credentials.unset(credentialRef(entry.ref));
         const remaining = store.entries.filter((item) => item.id !== entry.id);
@@ -313,7 +344,7 @@ export function installCodeBuddyWeb(ctx) {
         const store = await readSessionStore(webCtx.credentials);
         const accountId = typeof body.accountId === "string" ? body.accountId : store.activeId;
         const active = store.sessions.find((entry) => entry.id === accountId);
-        if (!active) return json(res, 409, { ok: false, message: "没有找到该 CodeBuddy 登录账号" });
+        if (!active) return json(res, 409, { ok: false, message: "没有找到该 WorkBuddy 登录账号" });
         await writeSessionStore(webCtx.credentials, { ...store, activeId: active.id });
         await setMode(webCtx.settings, "token");
         json(res, 200, await currentState());
@@ -323,7 +354,7 @@ export function installCodeBuddyWeb(ctx) {
     };
     const credits = async (req, res) => {
       if (req.method !== "POST") return json(res, 405, { ok: false, message: "Method not allowed" });
-      if (!localPost(req)) return json(res, 403, { ok: false, message: "只允许从本机 DSH 页面查询 CodeBuddy 积分" });
+      if (!localPost(req)) return json(res, 403, { ok: false, message: "只允许从本机 DSH 页面查询 WorkBuddy 积分" });
       try {
         if (authenticationMode(webCtx.settings.get("llm-pi-ai")) !== "token") {
           return json(res, 200, {
@@ -334,14 +365,14 @@ export function installCodeBuddyWeb(ctx) {
             segments: [],
             unlimited: false,
             cycleResetTime: null,
-            creditError: "积分查询仅支持 CodeBuddy 令牌登录",
+            creditError: "积分查询仅支持 WorkBuddy 令牌登录",
             todayUsage: null,
-            todayUsageError: "今日请求量查询仅支持 CodeBuddy 令牌登录",
+            todayUsageError: "今日请求量查询仅支持 WorkBuddy 令牌登录",
           });
         }
         const body = await requestBody(req);
         const session = await resolveSession(webCtx, body.accountId);
-        const result = await fetchCodeBuddyCredits(session);
+        const result = await fetchWorkBuddyCredits(session);
         json(res, 200, {
           ok: true,
           accountId: session.id,
@@ -363,9 +394,9 @@ export function installCodeBuddyWeb(ctx) {
           segments: [],
           unlimited: false,
           cycleResetTime: null,
-          creditError: error instanceof Error ? error.message : "查询 CodeBuddy 积分失败",
+          creditError: error instanceof Error ? error.message : "查询 WorkBuddy 积分失败",
           todayUsage: null,
-          todayUsageError: error instanceof Error ? error.message : "查询 CodeBuddy 今日请求量失败",
+          todayUsageError: error instanceof Error ? error.message : "查询 WorkBuddy 今日请求量失败",
         });
       }
     };
@@ -374,9 +405,9 @@ export function installCodeBuddyWeb(ctx) {
       if (!localPost(req)) return json(res, 403, { ok: false, message: "只允许从本机 DSH 页面登录" });
       try {
         loginPromise ??= (async () => {
-          const session = await loginCodeBuddy();
+          const session = await loginWorkBuddy();
           const store = await readSessionStore(webCtx.credentials);
-          await writeSessionStore(webCtx.credentials, upsertCodeBuddySession(store, session));
+          await writeSessionStore(webCtx.credentials, upsertWorkBuddySession(store, session));
           await setMode(webCtx.settings, "token");
         })().finally(() => {
           loginPromise = undefined;
@@ -384,7 +415,7 @@ export function installCodeBuddyWeb(ctx) {
         await loginPromise;
         json(res, 200, await currentState());
       } catch (error) {
-        json(res, 500, { ok: false, message: error instanceof Error ? error.message : "CodeBuddy 登录失败" });
+        json(res, 500, { ok: false, message: error instanceof Error ? error.message : "WorkBuddy 登录失败" });
       }
     };
     const remove = async (req, res) => {
@@ -395,7 +426,7 @@ export function installCodeBuddyWeb(ctx) {
         const store = await readSessionStore(webCtx.credentials);
         const accountId = typeof body.accountId === "string" ? body.accountId : store.activeId;
         const sessions = store.sessions.filter((entry) => entry.id !== accountId);
-        if (sessions.length === store.sessions.length) return json(res, 404, { ok: false, message: "没有找到该 CodeBuddy 登录账号" });
+        if (sessions.length === store.sessions.length) return json(res, 404, { ok: false, message: "没有找到该 WorkBuddy 登录账号" });
         const activeId = accountId === store.activeId ? sessions[0]?.id : store.activeId;
         await writeSessionStore(webCtx.credentials, { version: 1, activeId, sessions });
         json(res, 200, await currentState());
@@ -415,6 +446,6 @@ export function installCodeBuddyWeb(ctx) {
         webCtx.webServer.register({ kind: "exact", path: `${ROUTE}/remove`, handler: remove }),
       ];
       return () => dispose.forEach((fn) => fn());
-    }, "llm-codebuddy: web login routes");
+    }, "llm-workbuddy: web login routes");
   });
 }

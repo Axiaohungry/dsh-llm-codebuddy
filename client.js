@@ -1,8 +1,8 @@
 window.__ModuleLoader__.load({
-  id: "dsh-llm-codebuddy",
+  id: "dsh-llm-workbuddy",
   factory: () => {
-    const ROUTE = "/dsh-llm-codebuddy/auth";
-    const MARKER = "data-codebuddy-auth-switch";
+    const ROUTE = "/dsh-llm-workbuddy/auth";
+    const MARKER = "data-workbuddy-auth-switch";
 
     function button(text) {
       const element = document.createElement("button");
@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
 
     function accountPicker() {
       const element = document.createElement("select");
-      element.setAttribute("aria-label", "CodeBuddy 令牌账号");
+      element.setAttribute("aria-label", "WorkBuddy 令牌账号");
       Object.assign(element.style, {
         minHeight: "44px",
         minWidth: "180px",
@@ -114,11 +114,12 @@ window.__ModuleLoader__.load({
       element.style.setProperty("display", visible ? display : "none", "important");
     }
 
-    function isCodeBuddy(input) {
+    function isWorkBuddy(input) {
       const editor = input.parentElement?.parentElement;
       if (!editor) return false;
-      if (editor.textContent?.includes("codebuddy-cn")) return true;
-      return editor.parentElement?.querySelector('select[aria-label="提供方"]')?.value === "codebuddy-cn";
+      if (editor.textContent?.includes("workbuddy-cn") || editor.textContent?.includes("codebuddy-cn")) return true;
+      const provider = editor.parentElement?.querySelector('select[aria-label="提供方"]')?.value;
+      return provider === "workbuddy-cn" || provider === "codebuddy-cn";
     }
 
     function accountText(account) {
@@ -150,8 +151,8 @@ window.__ModuleLoader__.load({
       const visible = status.mode === "token" && Boolean(activeAccount);
       setVisible(stats, visible);
       if (!visible) return;
-      const credit = stats.querySelector('[data-codebuddy-stat="credits"]');
-      const usage = stats.querySelector('[data-codebuddy-stat="usage"]');
+      const credit = stats.querySelector('[data-workbuddy-stat="credits"]');
+      const usage = stats.querySelector('[data-workbuddy-stat="usage"]');
       credit.title = status.creditError || "";
       usage.title = status.todayUsageError || "";
       if (status.creditLoading) credit.textContent = "剩余积分：读取中…";
@@ -174,7 +175,7 @@ window.__ModuleLoader__.load({
       const accounts = Array.isArray(status.accounts) ? status.accounts : [];
       const activeAccountId = status.activeAccountId ?? accounts[0]?.id;
       input.disabled = token;
-      input.placeholder = token ? "当前使用 CodeBuddy 账号令牌" : "输入新的 API Key（保存到 DSH）";
+      input.placeholder = token ? "当前使用 WorkBuddy 账号令牌" : "输入新的 API Key（保存到 DSH）";
       newKeyInput.disabled = token;
       newKeyLabelInput.disabled = token;
       keyButton.setAttribute("aria-pressed", String(!token));
@@ -199,7 +200,7 @@ window.__ModuleLoader__.load({
       removeKeyButton.hidden = !activeApiKey || activeApiKey.kind !== "dsh";
       setVisible(tokenSection, token);
       tokenButton.textContent = token ? "令牌模式" : "令牌登录";
-      addButton.textContent = accounts.length ? "添加账号" : "登录 CodeBuddy";
+      addButton.textContent = accounts.length ? "添加账号" : "登录 WorkBuddy";
       setVisible(accountRow, token && accounts.length > 0);
       accountSelect.replaceChildren(...accounts.map((account) => {
         const option = document.createElement("option");
@@ -242,14 +243,14 @@ window.__ModuleLoader__.load({
     function mount(input) {
       const field = input.parentElement;
       if (!field || field.querySelector(`[${MARKER}]`)) return;
-      field.setAttribute("data-codebuddy-auth-field", "");
-      input.dataset.codebuddyPlaceholder = input.placeholder;
+      field.setAttribute("data-workbuddy-auth-field", "");
+      input.dataset.workbuddyPlaceholder = input.placeholder;
       for (const nativeNode of field.children) nativeNode.hidden = true;
       Object.assign(field.style, { display: "block", width: "100%", boxSizing: "border-box" });
       const controls = document.createElement("div");
       controls.setAttribute(MARKER, "");
       controls.setAttribute("role", "group");
-      controls.setAttribute("aria-label", "CodeBuddy 认证方式");
+      controls.setAttribute("aria-label", "WorkBuddy 认证方式");
       Object.assign(controls.style, {
         display: "flex",
         flexDirection: "column",
@@ -271,10 +272,10 @@ window.__ModuleLoader__.load({
       const keyButton = button("API Key");
       const tokenButton = button("令牌登录");
       const keySelect = accountPicker();
-      keySelect.setAttribute("aria-label", "CodeBuddy API Key 来源");
+      keySelect.setAttribute("aria-label", "WorkBuddy API Key 来源");
       const keySourceLabel = fieldLabel("当前 API Key");
       const newKeyLabel = fieldLabel("新增 API Key");
-      const newKeyInput = textInput("password", "粘贴新的 API Key", "新增 CodeBuddy API Key");
+      const newKeyInput = textInput("password", "粘贴新的 API Key", "新增 WorkBuddy API Key");
       const newKeyLabelInput = textInput("text", "名称（可选）", "API Key 名称");
       const keyHint = document.createElement("span");
       Object.assign(keyHint.style, {
@@ -325,9 +326,9 @@ window.__ModuleLoader__.load({
         color: "var(--dsw-text-secondary, #667085)",
       });
       const creditStat = document.createElement("span");
-      creditStat.dataset.codebuddyStat = "credits";
+      creditStat.dataset.workbuddyStat = "credits";
       const usageStat = document.createElement("span");
-      usageStat.dataset.codebuddyStat = "usage";
+      usageStat.dataset.workbuddyStat = "usage";
       accountStats.append(creditStat, usageStat);
       const message = document.createElement("span");
       message.setAttribute("role", "status");
@@ -362,7 +363,7 @@ window.__ModuleLoader__.load({
           render({ ...result, creditLoading: false });
         } catch (error) {
           if (requestId !== creditRequestId || current.activeAccountId !== accountId) return;
-          render({ credits: null, creditLoading: false, creditError: error instanceof Error ? error.message : "查询 CodeBuddy 积分失败", todayUsage: null, todayUsageError: "查询 CodeBuddy 今日请求量失败" });
+          render({ credits: null, creditLoading: false, creditError: error instanceof Error ? error.message : "查询 WorkBuddy 积分失败", todayUsage: null, todayUsageError: "查询 WorkBuddy 今日请求量失败" });
         }
       };
 
@@ -455,7 +456,7 @@ window.__ModuleLoader__.load({
       tokenButton.addEventListener("click", async () => {
         setBusy(true);
         tokenButton.textContent = "切换中…";
-        message.textContent = current.accounts?.length ? "正在切换令牌账号…" : "请在浏览器中完成 CodeBuddy 中国站登录";
+        message.textContent = current.accounts?.length ? "正在切换令牌账号…" : "请在浏览器中完成 WorkBuddy 中国站登录";
         try {
           const next = await request(current.accounts?.length ? "token" : "login");
           render(next);
@@ -470,7 +471,7 @@ window.__ModuleLoader__.load({
       addButton.addEventListener("click", async () => {
         setBusy(true);
         addButton.textContent = "等待浏览器登录…";
-        message.textContent = "请在浏览器中完成 CodeBuddy 中国站登录";
+        message.textContent = "请在浏览器中完成 WorkBuddy 中国站登录";
         try {
           const next = await request("login");
           render(next);
@@ -497,7 +498,7 @@ window.__ModuleLoader__.load({
         }
       });
       removeButton.addEventListener("click", async () => {
-        if (!current.activeAccountId || !window.confirm("确定删除这个 CodeBuddy 登录账号吗？令牌将从 DSH 凭据中移除。")) return;
+        if (!current.activeAccountId || !window.confirm("确定删除这个 WorkBuddy 登录账号吗？令牌将从 DSH 凭据中移除。")) return;
         setBusy(true);
         message.textContent = "正在删除账号…";
         try {
@@ -525,7 +526,7 @@ window.__ModuleLoader__.load({
 
     function enhance() {
       for (const input of document.querySelectorAll('input[aria-label="API 密钥"]')) {
-        if (isCodeBuddy(input)) mount(input);
+        if (isWorkBuddy(input)) mount(input);
       }
     }
 
@@ -539,9 +540,9 @@ window.__ModuleLoader__.load({
           observer.disconnect();
           document.removeEventListener("change", enhance, true);
         };
-      }, "llm-codebuddy: auth switch");
+      }, "llm-workbuddy: auth switch");
     }
 
-    return { name: "dsh-llm-codebuddy-client", inject: [], apply };
+    return { name: "dsh-llm-workbuddy-client", inject: [], apply };
   },
 });

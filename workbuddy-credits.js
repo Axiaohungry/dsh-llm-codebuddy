@@ -66,7 +66,7 @@ function billingHost(session) {
 
 function authToken(session) {
   const token = typeof session?.auth?.accessToken === "string" ? session.auth.accessToken.trim() : "";
-  if (!token) throw new Error("CodeBuddy 登录令牌为空");
+  if (!token) throw new Error("WorkBuddy 登录令牌为空");
   return token;
 }
 
@@ -273,7 +273,7 @@ function enterpriseUsage(payload) {
 }
 
 async function queryPersonalCredits(session, host, options = {}) {
-  const payload = await postJson(`${host}/v2/billing/meter/get-user-resource`, session, buildCreditResourceBody(), "CodeBuddy 积分接口", { ...options, host });
+  const payload = await postJson(`${host}/v2/billing/meter/get-user-resource`, session, buildCreditResourceBody(), "WorkBuddy 积分接口", { ...options, host });
   const accounts = extractAccounts(payload);
   let credits = 0;
   for (const account of accounts) {
@@ -303,20 +303,20 @@ async function resolveEnterpriseId(session, host, options = {}) {
     headers: billingHeaders(session, host),
     signal: timeoutSignal(8_000, options.signal),
   });
-  const payload = await readJson(response, "CodeBuddy 企业账号接口");
+  const payload = await readJson(response, "WorkBuddy 企业账号接口");
   const accounts = payload?.data?.accounts;
   const first = Array.isArray(accounts) ? accounts[0] : undefined;
   return typeof first?.enterpriseId === "string" ? first.enterpriseId.trim() : "";
 }
 
 async function queryEnterpriseCredits(session, host, enterpriseId, options = {}) {
-  const payload = await postJson(`${host}/v2/billing/meter/get-enterprise-user-usage`, session, {}, "CodeBuddy 企业积分接口", {
+  const payload = await postJson(`${host}/v2/billing/meter/get-enterprise-user-usage`, session, {}, "WorkBuddy 企业积分接口", {
     ...options,
     host,
     enterpriseId,
   });
   const parsed = enterpriseUsage(payload);
-  if (!parsed) throw new Error("CodeBuddy 企业积分接口返回数据无法解析");
+  if (!parsed) throw new Error("WorkBuddy 企业积分接口返回数据无法解析");
   return parsed;
 }
 
@@ -357,7 +357,7 @@ async function queryTodayUsage(session, host, options = {}) {
       endTime: formatLocalDateTime(now),
       pageNum,
       pageSize: PAGE_SIZE,
-    }, "CodeBuddy 今日请求量接口", { ...options, host, fetchImpl, timeoutMs: options.usageTimeoutMs ?? 8_000 });
+    }, "WorkBuddy 今日请求量接口", { ...options, host, fetchImpl, timeoutMs: options.usageTimeoutMs ?? 8_000 });
     const page = usageRows(payload);
     if (expectedTotal === null) expectedTotal = page.total;
     if (!page.rows.length) break;
@@ -392,7 +392,7 @@ async function retry(task, attempts = 2) {
   throw lastError;
 }
 
-export async function fetchCodeBuddyCredits(session, options = {}) {
+export async function fetchWorkBuddyCredits(session, options = {}) {
   const host = billingHost(session);
   const account = session?.account && typeof session.account === "object" ? session.account : {};
   let creditResult;
